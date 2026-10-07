@@ -733,4 +733,25 @@ public class TestSmtpServer {
 			}
 		}, 60000, "large delivery");
 	}
+
+	/** The shared MaxLoginAttempts setting: 3 by default */
+	@Test
+	public void testMaxLoginAttempts() throws Exception {
+		for (int max : new int[] {3, 2}) {
+			if( max != 3 ) {
+				submission.setMaxLoginAttempts(max);
+			}
+			try (Client c = new Client(submission.getLocalPort())) {
+				String ehlo = c.cmd("EHLO client.example");
+				assertTrue(ehlo.contains("AUTH"), ehlo);
+				for (int i = 1; i < max; i++) {
+					assertTrue(c.cmd("AUTH PLAIN " + plain("tony", "wrong")).startsWith("535 5.7.8"), "failure "+i);
+				}
+				assertTrue(c.cmd("AUTH PLAIN " + plain("tony", "wrong")).startsWith("421 4.7.0"), "too many after "+max);
+				assertNull(c.line(), "closed");
+			} finally {
+				submission.setMaxLoginAttempts(3);
+			}
+		}
+	}
 }

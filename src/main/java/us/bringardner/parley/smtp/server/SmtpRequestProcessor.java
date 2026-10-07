@@ -57,7 +57,6 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 
 	private static final int MAX_COMMAND_LINE = 4096;
 	private static final int MAX_ERRORS = 20;
-	private static final int MAX_AUTH_FAILURES = 3;
 	private static final int POLL_INTERVAL = 1000;
 	private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -421,7 +420,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 				Thread.currentThread().interrupt();
 			}
 		}
-		if (++authFailures >= MAX_AUTH_FAILURES) {
+		if (getSmtpServer().isTooManyLoginFailures(++authFailures)) {
 			reply(SERVICE_NOT_AVAILABLE, "4.7.0", "Too many authentication failures");
 			closing = true;
 		} else {

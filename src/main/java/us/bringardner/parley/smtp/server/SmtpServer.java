@@ -76,7 +76,6 @@ public class SmtpServer extends Server implements SMTP {
 	private volatile long maxMessageSize = Long.getLong(P + "maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 	private volatile int maxRecipients = Integer.getInteger(P + "maxRecipients", 100);
 	private volatile int timeout = Integer.getInteger(P + "timeout", 5 * 60 * 1000);
-	private volatile int loginFailureDelay = Integer.getInteger(P + "loginFailureDelay", 1000);
 	private volatile int maxHops = Integer.getInteger(P + "maxHops", 100);
 	//  Replaced (not changed) when a network is added, so isRelayAllowed needs no lock
 	private volatile AddressMatcher relayNetworks = AddressMatcher.NONE;
@@ -585,12 +584,13 @@ public class SmtpServer extends Server implements SMTP {
 		this.timeout = timeout;
 	}
 
-	public int getLoginFailureDelay() {
-		return loginFailureDelay;
-	}
-
-	public void setLoginFailureDelay(int loginFailureDelay) {
-		this.loginFailureDelay = Math.max(0, loginFailureDelay);
+	/**
+	 * The shared LoginFailureDelay setting (see AbstractCoreServer) defaults to the older
+	 * JSmtp.loginFailureDelay system property, else 1000 ms.
+	 */
+	@Override
+	protected int getDefaultLoginFailureDelay() {
+		return Integer.getInteger(P + "loginFailureDelay", DEFAULT_LOGIN_FAILURE_DELAY);
 	}
 
 	public int getMaxHops() {
