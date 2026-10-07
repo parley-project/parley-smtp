@@ -2,170 +2,101 @@
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
-	<artifactId>bjl_email</artifactId>
-	<name>Bringardner Java Library Email</name>
-	<groupId>us.bringardner</groupId>
-	<version>1.0.0-SNAPSHOT</version>
 
-	<description>Email message primitives (addresses, headers, RFC 5322 dates) for the BJL Network Framework.</description>
+	<!-- License, developer, SCM, URL, Java level and the Maven Central release profile
+	     all come from parley-parent. -->
+	<parent>
+		<groupId>us.bringardner.parley</groupId>
+		<artifactId>parley-parent</artifactId>
+		<version>1.0.0-SNAPSHOT</version>
+		<relativePath>../parley-parent/pom.xml</relativePath>
+	</parent>
+
+	<artifactId>parley-smtp</artifactId>
+	<version>1.0.0-SNAPSHOT</version>
+	<name>Parley SMTP</name>
+	<description>An SMTP server and mail transfer agent (RFC 5321) with a persistent relay queue,
+		local delivery into the parley-mail store, and DKIM, SPF, DMARC and ARC.
+		Built on parley-net, with DNS from parley-dns. Split out of us.bringardner:bjl_email.</description>
+	<inceptionYear>2026</inceptionYear>
 
 	<properties>
-		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<!-- The oldest Java the code and its bjl_* dependencies (built for Java 11) run on -->
-		<maven.compiler.release>11</maven.compiler.release>
-		<!-- Branch the GitHub site plugin pushes to on deploy; override with -Dbranch-name=... -->
-		<branch-name>V${project.version}</branch-name>
+		<!-- Written to the jar manifest as Automatic-Module-Name -->
+		<parley.moduleName>us.bringardner.parley.smtp</parley.moduleName>
+		<junit.version>5.11.4</junit.version>
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.junit</groupId>
+				<artifactId>junit-bom</artifactId>
+				<version>${junit.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<build>
 		<pluginManagement>
 			<plugins>
 				<plugin>
 					<groupId>org.apache.maven.plugins</groupId>
-					<artifactId>maven-compiler-plugin</artifactId>
-					<version>3.13.0</version>
-				</plugin>
-
-				<plugin>
-					<groupId>org.apache.maven.plugins</groupId>
-					<artifactId>maven-source-plugin</artifactId>
-					<version>3.3.1</version>
-					<executions>
-						<execution>
-							<id>attach-sources</id>
-							<goals>
-								<goal>jar-no-fork</goal>
-							</goals>
-							<phase>package</phase>							
-							<configuration>
-								<skipSource>false</skipSource>
-								<attach>true</attach>
-							</configuration>
-						</execution>
-					</executions>
-				</plugin>
-				<plugin>
-					<artifactId>maven-deploy-plugin</artifactId>
-					<version>2.8.2</version>
-				</plugin>
-				<plugin>
-					<groupId>com.github.github</groupId>
-					<artifactId>site-maven-plugin</artifactId>
-					<version>0.12</version>
-					<configuration>
-						<message>Maven artifacts for ${project.version}</message>
-						<noJekyll>true</noJekyll>
-						<outputDirectory>${project.build.directory}</outputDirectory>
-						<branch>refs/heads/${branch-name}</branch>
-						<includes>
-							<include>**/*</include>
-						</includes>
-						<merge>true</merge>
-						<repositoryName>BjlEmail</repositoryName>
-						<repositoryOwner>tony-bringardner</repositoryOwner>
-						<server>github</server>
-					</configuration>
-					<executions>
-						<execution>
-							<goals>
-								<goal>site</goal>
-							</goals>
-							<phase>deploy</phase>
-						</execution>
-					</executions>
-				</plugin>
-
-				<plugin>
-					<groupId>org.apache.maven.plugins</groupId>
 					<artifactId>maven-surefire-plugin</artifactId>
-					<version>3.5.2</version>
 					<configuration>
-						<!-- Small heap on purpose: TestLargeMessage handles a 150 MB attachment,
-						     which only passes if Message keeps bodies out of memory. -->
+						<!-- Small heap on purpose: message bodies must stay out of memory. -->
 						<argLine>-Xmx64m</argLine>
 					</configuration>
 				</plugin>
 			</plugins>
 		</pluginManagement>
-
-		<!-- Versions and configuration come from pluginManagement above;
-		     listing them here is what makes their executions run. -->
-		<plugins>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-source-plugin</artifactId>
-			</plugin>
-			<plugin>
-				<groupId>com.github.github</groupId>
-				<artifactId>site-maven-plugin</artifactId>
-			</plugin>
-		</plugins>
 	</build>
 
+	<!-- GitHub Packages, used by release.sh. Maven Central releases use: mvn -Prelease clean deploy -->
 	<distributionManagement>
 		<repository>
 			<id>github</id>
 			<name>tony-bringardner</name>
-			<url>https://maven.pkg.github.com/tony-bringardner/BjlEmail</url>
+			<url>https://maven.pkg.github.com/tony-bringardner/parley-smtp</url>
 		</repository>
-
 	</distributionManagement>
 
-	<url>http://bringardner.us/BJL/BjlEmail</url>
-	<inceptionYear>2026</inceptionYear>
-
-	<!-- bjl_core (and the other BJL packages) are published to GitHub Packages; the id matches the
-	     <server> with the GitHub credentials in ~/.m2/settings.xml. -->
-	<repositories>
-		<repository>
-			<id>github</id>
-			<url>https://maven.pkg.github.com/tony-bringardner/BjlCore</url>
-		</repository>
-	</repositories>
-
 	<dependencies>
-		<!-- Used directly (IoUtils), so named here too -->
+		<!-- Messages, and the mail store LocalDelivery writes to -->
 		<dependency>
-			<groupId>us.bringardner</groupId>
-			<artifactId>bjl_io</artifactId>
-			<version>1.1.1-SNAPSHOT</version>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-mail</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
 		</dependency>
+		<!-- Server, client, sessions, TLS, authentication -->
 		<dependency>
-  			<groupId>us.bringardner</groupId>
-  			<artifactId>bjl_net_framework</artifactId>
-  			<version>1.1.0-SNAPSHOT</version>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-net</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
 		</dependency>
-		<!-- Used directly (AddressMatcher, TlsSockets, TrustAllCertificates), so named here too -->
+		<!-- ParleyDnsMxResolver (MX lookups for the queue) and the DKIM, SPF, DMARC and ARC lookups -->
 		<dependency>
-			<groupId>us.bringardner</groupId>
-			<artifactId>bjl_core</artifactId>
-			<version>1.3.1-SNAPSHOT</version>
-		</dependency>
-		<dependency>
-  			<groupId>us.bringardner</groupId>
-  			<artifactId>bjl_file_system</artifactId>
-  			<version>1.0.2-SNAPSHOT</version>
-		</dependency>
-		<!-- DNS client for BjlDnsMxResolver (MX lookups for the SMTP queue) and DKIM key lookups.
-		     1.0.1 adds the typed Lookup API.
-		     bjl_core and bjl_io come from the framework instead of its older versions. -->
-		<dependency>
-  			<groupId>us.bringardner</groupId>
-  			<artifactId>bjl_dns</artifactId>
-  			<version>1.0.1-SNAPSHOT</version>
-  			<exclusions>
-  				<exclusion>
-  					<groupId>us.bringardner</groupId>
-  					<artifactId>bjl_core</artifactId>
-  				</exclusion>
-  				<exclusion>
-  					<groupId>us.bringardner</groupId>
-  					<artifactId>bjl_io</artifactId>
-  				</exclusion>
-  			</exclusions>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-dns</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
 		</dependency>
 
-		<!-- reads the RFC 7208 (SPF) test suite in src/test/resources/spf -->
+		<!-- Tests only: TestSmtpServer reuses TestPop3Server's keystore helper (from the tests jar) -->
+		<dependency>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-pop3</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-pop3</artifactId>
+			<version>1.0.0-SNAPSHOT</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
+		<!-- reads the RFC 7208 (SPF) and ARC test suites in src/test/resources -->
 		<dependency>
 			<groupId>org.yaml</groupId>
 			<artifactId>snakeyaml</artifactId>
@@ -174,14 +105,7 @@
 		</dependency>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
-			<artifactId>junit-jupiter-engine</artifactId>
-			<version>5.9.1</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.junit.platform</groupId>
-			<artifactId>junit-platform-suite-engine</artifactId>
-			<version>1.9.1</version>
+			<artifactId>junit-jupiter</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
