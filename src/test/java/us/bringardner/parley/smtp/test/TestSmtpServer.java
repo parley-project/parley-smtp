@@ -754,4 +754,21 @@ public class TestSmtpServer {
 			}
 		}
 	}
+
+	/** LoginTimeLimit applies to submission, where a login is needed, not to receiving mail */
+	@Test
+	public void testLoginTimeLimit() throws Exception {
+		submission.setLoginTimeLimit(300);
+		a.setLoginTimeLimit(300);
+		try (Client sub = new Client(submission.getLocalPort()); Client mx = new Client(a.getLocalPort())) {
+			assertTrue(sub.cmd("EHLO client.example").startsWith("250"));
+			assertTrue(mx.cmd("EHLO client.example").startsWith("250"));
+			Thread.sleep(1000);
+			assertNull(sub.line(), "submission without a login is closed after the limit");
+			assertTrue(mx.cmd("NOOP").startsWith("250"), "receiving mail needs no login");
+		} finally {
+			submission.setLoginTimeLimit(0);
+			a.setLoginTimeLimit(0);
+		}
+	}
 }

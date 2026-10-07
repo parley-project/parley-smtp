@@ -588,6 +588,15 @@ public class SmtpServer extends Server implements SMTP {
 	 * The shared LoginFailureDelay setting (see AbstractCoreServer) defaults to the older
 	 * JSmtp.loginFailureDelay system property, else 1000 ms.
 	 */
+	/**
+	 * Only submission needs a login: mail for local users arrives without one, so the
+	 * LoginTimeLimit applies only to a submission server.
+	 */
+	@Override
+	protected boolean isLoginRequired() {
+		return isSubmission();
+	}
+
 	@Override
 	protected int getDefaultLoginFailureDelay() {
 		return Integer.getInteger(P + "loginFailureDelay", DEFAULT_LOGIN_FAILURE_DELAY);
