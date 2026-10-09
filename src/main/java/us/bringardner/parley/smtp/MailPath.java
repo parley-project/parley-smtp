@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp;
 
+import us.bringardner.parley.core.util.Hex;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -151,7 +152,8 @@ public final class MailPath {
 		for (byte b : s.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
 			int c = b & 0xff;
 			if (c < 33 || c > 126 || c == '+' || c == '=') {
-				sb.append('+').append(String.format("%02X", c));
+				sb.append('+');
+				Hex.appendUpper(sb, c);
 			} else {
 				sb.append((char) c);
 			}

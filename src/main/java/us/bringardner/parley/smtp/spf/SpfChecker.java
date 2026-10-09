@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.spf;
 
+import us.bringardner.parley.core.util.Hex;
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -693,7 +694,8 @@ public final class SpfChecker {
 					|| c == '~') {
 				sb.append((char) c);
 			} else {
-				sb.append('%').append(String.format("%02X", c));
+				sb.append('%');
+				Hex.appendUpper(sb, c);
 			}
 		}
 		return sb.toString();
