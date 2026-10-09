@@ -51,6 +51,23 @@
 				</plugin>
 			</plugins>
 		</pluginManagement>
+		<plugins>
+			<!-- Attaches the -sources.jar. The version comes from parley-parent; package (not deploy)
+			     so the source jar is attached BEFORE the deploy plugin runs. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-source-plugin</artifactId>
+				<executions>
+					<execution>
+						<id>attach-sources</id>
+						<phase>package</phase>
+						<goals>
+							<goal>jar-no-fork</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+		</plugins>
 	</build>
 
 	<!-- GitHub Packages, used by release.sh. Maven Central releases use: mvn -Prelease clean deploy -->
