@@ -1,5 +1,7 @@
 package us.bringardner.parley.smtp.dkim;
 
+import us.bringardner.parley.core.util.Hex;
+import us.bringardner.parley.core.util.Der;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -33,11 +35,11 @@ import java.util.Base64;
 public final class DkimKeys {
 
 	/** The DER prefix of an Ed25519 SubjectPublicKeyInfo; the 32 key bytes follow. */
-	private static final byte[] ED25519_SPKI_PREFIX = hex("302a300506032b6570032100");
+	private static final byte[] ED25519_SPKI_PREFIX = Der.ED25519_SPKI_PREFIX;
 	/** The DER prefix of an Ed25519 PKCS#8 private key; the 32-byte seed follows. */
-	private static final byte[] ED25519_PKCS8_PREFIX = hex("302e020100300506032b657004220420");
+	private static final byte[] ED25519_PKCS8_PREFIX = Der.ED25519_PKCS8_PREFIX;
 	/** AlgorithmIdentifier rsaEncryption with NULL parameters. */
-	private static final byte[] RSA_ALGORITHM_ID = hex("300d06092a864886f70d0101010500");
+	private static final byte[] RSA_ALGORITHM_ID = Hex.decode("300d06092a864886f70d0101010500");
 
 	private DkimKeys() {
 	}
@@ -69,7 +71,7 @@ public final class DkimKeys {
 		}
 		if (pkcs1) {
 			// PrivateKeyInfo { version 0, rsaEncryption, OCTET STRING { RSAPrivateKey } }
-			der = sequence(concat(hex("020100"), RSA_ALGORITHM_ID, tlv(0x04, der)));
+			der = sequence(concat(Hex.decode("020100"), RSA_ALGORITHM_ID, tlv(0x04, der)));
 			return KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(der));
 		}
 		GeneralSecurityException first = null;
@@ -227,13 +229,5 @@ public final class DkimKeys {
 			out.write(p, 0, p.length);
 		}
 		return out.toByteArray();
-	}
-
-	private static byte[] hex(String s) {
-		byte[] ret = new byte[s.length() / 2];
-		for (int i = 0; i < ret.length; i++) {
-			ret[i] = (byte) Integer.parseInt(s.substring(2 * i, 2 * i + 2), 16);
-		}
-		return ret;
 	}
 }

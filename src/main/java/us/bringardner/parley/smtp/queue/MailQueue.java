@@ -1,7 +1,6 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
+import us.bringardner.parley.io.IoUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -252,7 +251,7 @@ public class MailQueue {
 		}
 		try {
 			String domain = null;
-			try (InputStream in = new BufferedInputStream(incoming.getInputStream(), 64 * 1024)) {
+			try (InputStream in = IoUtils.buffered(incoming.getInputStream())) {
 				HeaderFields.Field from = HeaderFields.read(in).get("From");
 				if (from != null) {
 					domain = HeaderFields.addressDomain(from.getValue());
@@ -263,7 +262,7 @@ public class MailQueue {
 				return false;
 			}
 			String field;
-			try (InputStream in = new BufferedInputStream(incoming.getInputStream(), 64 * 1024)) {
+			try (InputStream in = IoUtils.buffered(incoming.getInputStream())) {
 				field = signer.sign(in);
 			}
 			HeaderRewriter.prepend(incoming, incoming(id + "k"), field);
@@ -290,7 +289,7 @@ public class MailQueue {
 		}
 		try {
 			String set;
-			try (InputStream in = new BufferedInputStream(content.getInputStream(), 64 * 1024)) {
+			try (InputStream in = IoUtils.buffered(content.getInputStream())) {
 				set = sealer.seal(in, config.getHostname());
 			}
 			synchronized (e) {
@@ -321,9 +320,9 @@ public class MailQueue {
 		FileSource in = incoming(e.id);
 		boolean eight = false;
 		long size = 0;
-		try (OutputStream out = new BufferedOutputStream(in.getOutputStream(), 64 * 1024);
+		try (OutputStream out = IoUtils.buffered(in.getOutputStream());
 				SmtpStreams.CrlfOutputStream crlf = new SmtpStreams.CrlfOutputStream(out);
-				InputStream src = new BufferedInputStream(content, 64 * 1024)) {
+				InputStream src = IoUtils.buffered(content)) {
 			byte[] buf = new byte[64 * 1024];
 			int n;
 			while ((n = src.read(buf)) > 0) {

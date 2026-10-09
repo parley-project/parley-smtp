@@ -1,8 +1,8 @@
 package us.bringardner.parley.smtp.server.commands;
 
 import java.io.IOException;
-import java.util.Locale;
 
+import us.bringardner.parley.net.server.AbstractCommand;
 import us.bringardner.parley.net.server.ICommandProcessor;
 import us.bringardner.parley.net.server.IPermission;
 import us.bringardner.parley.net.server.IRequestContext;
@@ -11,34 +11,13 @@ import us.bringardner.parley.smtp.server.SmtpCommand;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 
 /** Base for SMTP commands. */
-public abstract class BaseCommand implements SmtpCommand, SMTP {
+public abstract class BaseCommand extends AbstractCommand implements SmtpCommand, SMTP {
 
 	private static final long serialVersionUID = 1L;
 
-	private String name;
-	private String help;
 
 	protected BaseCommand(String command) {
-		this.name = command.toUpperCase(Locale.ROOT);
-		this.help = "No help available for " + name;
-	}
-
-	@Override
-	public String getName() {
-		return name;
-	}
-
-	public void setName(String name) {
-		this.name = name;
-	}
-
-	@Override
-	public String getHelp() {
-		return help;
-	}
-
-	public void setHelp(String help) {
-		this.help = help;
+		super(command);
 	}
 
 	@Override

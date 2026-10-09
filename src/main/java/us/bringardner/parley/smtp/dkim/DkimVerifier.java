@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.dkim;
 
+import us.bringardner.parley.io.IoUtils;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -62,7 +63,7 @@ public final class DkimVerifier {
 	 * @return one result per signature, or a single {@link DkimResult.Result#NONE}
 	 */
 	public List<DkimResult> verify(InputStream message) throws IOException {
-		InputStream in = message instanceof BufferedInputStream ? message : new BufferedInputStream(message, 64 * 1024);
+		InputStream in = message instanceof BufferedInputStream ? message : IoUtils.buffered(message);
 		HeaderFields fields = HeaderFields.read(in);
 		long now = clock.getAsLong();
 		List<Check> checks = new ArrayList<>();

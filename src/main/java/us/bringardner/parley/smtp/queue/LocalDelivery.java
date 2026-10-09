@@ -1,6 +1,6 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedInputStream;
+import us.bringardner.parley.io.IoUtils;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -145,7 +145,7 @@ public final class LocalDelivery {
 		store.init(config.isCreateDefaultMailboxes());
 		Mailbox mb = store.open(entry.quarantine ? junkMailbox(store) : "INBOX");
 		try (InputStream in = new SequenceInputStream(new ByteArrayInputStream(header.getBytes(StandardCharsets.UTF_8)),
-				new BufferedInputStream(content.getInputStream(), 64 * 1024))) {
+				IoUtils.buffered(content.getInputStream()))) {
 			return mb.append(in, java.util.Set.of(), System.currentTimeMillis()).getUid();
 		} finally {
 			MailboxRegistry.get().release(mb);

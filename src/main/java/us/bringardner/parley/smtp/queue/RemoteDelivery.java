@@ -1,6 +1,5 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -249,7 +248,7 @@ public final class RemoteDelivery {
 			c.quit();
 			return results;
 		}
-		try (InputStream in = new BufferedInputStream(content.getInputStream(), 64 * 1024)) {
+		try (InputStream in = IoUtils.buffered(content.getInputStream())) {
 			r = entry.body == QueueEntry.Body.BINARY ? c.bdat(in, content.length()) : c.data(in);
 		}
 		DeliveryException failed = r.code == 250 ? null : fromReply(r, host, "end of data");

@@ -1,6 +1,7 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedOutputStream;
+import us.bringardner.parley.io.IoUtils;
+import us.bringardner.parley.mail.Sasl;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,7 +10,6 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -94,7 +94,7 @@ public class SmtpClient implements Closeable {
 
 	private void streams() throws IOException {
 		in = new SmtpInput(socket.getInputStream());
-		out = new BufferedOutputStream(socket.getOutputStream(), 64 * 1024);
+		out = IoUtils.buffered(socket.getOutputStream());
 	}
 
 	public String getHost() {
@@ -204,8 +204,7 @@ public class SmtpClient implements Closeable {
 
 	/** AUTH PLAIN (RFC 4954, RFC 4616). */
 	public Reply authPlain(String user, String password) throws IOException {
-		String ir = Base64.getEncoder().encodeToString(("\0" + user + "\0" + password).getBytes(StandardCharsets.UTF_8));
-		return command("AUTH PLAIN " + ir);
+		return command("AUTH PLAIN " + Sasl.encodePlain(user, password));
 	}
 
 	/** DATA content (dot-stuffed, ending with "."); returns the final reply. */

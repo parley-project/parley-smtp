@@ -1,7 +1,6 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
+import us.bringardner.parley.io.IoUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -167,11 +166,11 @@ public final class DsnBuilder {
 		}
 		h.append("\r\n");
 
-		try (OutputStream raw = new BufferedOutputStream(dest.getOutputStream(), 64 * 1024)) {
+		try (OutputStream raw = IoUtils.buffered(dest.getOutputStream())) {
 			CountingOutputStream count = new CountingOutputStream(raw);
 			count.write(h.toString().getBytes(StandardCharsets.UTF_8));
 			SmtpStreams.CrlfOutputStream out = new SmtpStreams.CrlfOutputStream(count);
-			try (InputStream in = new BufferedInputStream(content.getInputStream(), 64 * 1024)) {
+			try (InputStream in = IoUtils.buffered(content.getInputStream())) {
 				if (full) {
 					in.transferTo(out);
 				} else {

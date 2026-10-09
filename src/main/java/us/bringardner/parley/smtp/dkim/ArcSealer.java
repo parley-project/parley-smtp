@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.dkim;
 
+import us.bringardner.parley.io.IoUtils;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -73,7 +74,7 @@ public final class ArcSealer {
 	 *         top of the message; or null if the message must not be sealed
 	 */
 	public String seal(InputStream message, String authServId, long now) throws IOException, GeneralSecurityException {
-		InputStream in = message instanceof BufferedInputStream ? message : new BufferedInputStream(message, 64 * 1024);
+		InputStream in = message instanceof BufferedInputStream ? message : IoUtils.buffered(message);
 		HeaderFields fields = HeaderFields.read(in);
 		TreeMap<Integer, ArcVerifier.Set> sets = ArcVerifier.sets(fields);
 

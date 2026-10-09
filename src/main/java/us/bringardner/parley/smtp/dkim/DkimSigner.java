@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.dkim;
 
+import us.bringardner.parley.io.IoUtils;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -152,7 +153,7 @@ public final class DkimSigner {
 	 * @return the DKIM-Signature field, folded and ending with CRLF
 	 */
 	public String sign(InputStream message, long now) throws IOException, GeneralSecurityException {
-		InputStream in = message instanceof BufferedInputStream ? message : new BufferedInputStream(message, 64 * 1024);
+		InputStream in = message instanceof BufferedInputStream ? message : IoUtils.buffered(message);
 		HeaderFields fields = HeaderFields.read(in);
 		if (fields.get("from") == null) {
 			throw new GeneralSecurityException("The message has no From field");

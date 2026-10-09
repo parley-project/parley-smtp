@@ -1,32 +1,24 @@
 package us.bringardner.parley.smtp.server;
 
+import us.bringardner.parley.net.server.ServerMain;
+import us.bringardner.parley.mail.server.AbstractMailServer;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Properties;
 
-import javax.net.ssl.SSLContext;
 
-import us.bringardner.parley.core.ILogger.Level;
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.files.FileSource;
-import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.mail.Message;
-import us.bringardner.parley.net.Connection;
-import us.bringardner.parley.net.IConnection;
-import us.bringardner.parley.net.IConnectionFactory;
 import us.bringardner.parley.net.IProcessor;
 import us.bringardner.parley.net.IProcessorFactory;
 import us.bringardner.parley.net.server.IAccessControlList;
-import us.bringardner.parley.net.server.Server;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.dkim.Dkim;
@@ -55,7 +47,7 @@ import us.bringardner.parley.smtp.queue.QueueEntry;
  * RFC 6409) run two servers sharing one queue ({@link #setQueue(MailQueue)}),
  * as {@link #main(String[])} does.
  */
-public class SmtpServer extends Server implements SMTP {
+public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	private static final long serialVersionUID = 1L;
 
@@ -72,7 +64,6 @@ public class SmtpServer extends Server implements SMTP {
 
 	private volatile String hostname;
 	private volatile boolean submission = Boolean.getBoolean(P + "submission");
-	private volatile boolean requireTls = Boolean.getBoolean(P + "requireTls");
 	private volatile long maxMessageSize = Long.getLong(P + "maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 	private volatile int maxRecipients = Integer.getInteger(P + "maxRecipients", 100);
 	private volatile int timeout = Integer.getInteger(P + "timeout", 5 * 60 * 1000);
@@ -80,33 +71,20 @@ public class SmtpServer extends Server implements SMTP {
 	//  Replaced (not changed) when a network is added, so isRelayAllowed needs no lock
 	private volatile AddressMatcher relayNetworks = AddressMatcher.NONE;
 
-	private FileSource maildropRoot;
-	private FileSourceFactory factory = FileSourceFactory.getDefaultFactory();
 	private final DeliveryConfig deliveryConfig = new DeliveryConfig();
 	private MailQueue queue;
 	private boolean ownsQueue;
 	private boolean queueStarted;
-	private volatile Boolean tlsAvailable;
-
-	private final class ServerConnection extends Connection {
-		ServerConnection(Socket socket, boolean useCRLF, Level logLevel) throws IOException {
-			super(socket, useCRLF);
-			getLogger().setLevel(logLevel);
-		}
-
-		@Override
-		public SSLContext getSSLContext(String sslOrTls) throws IOException {
-			return SmtpServer.this.getSSLContext(sslOrTls);
-		}
-	}
 
 	public SmtpServer(int port, String name, boolean secure) {
-		super(port, name);
-		setPropertyPrefix("SmtpServer");
-		setSecure(secure);
-		setDaemon(false);
+		super(port, name, "SmtpServer", secure);
 		initMe();
-		getLogger().setLevel(Level.INFO);
+		finishInit();
+	}
+
+	@Override
+	protected String getRootProperty() {
+		return ROOT_PROP;
 	}
 
 	public SmtpServer() {
@@ -126,24 +104,7 @@ public class SmtpServer extends Server implements SMTP {
 	 * are set, submission servers sharing its queue.
 	 */
 	public static void main(String[] args) throws Exception {
-		System.out.println("\nStarting SmtpServer with " + args.length + " args");
-		for (int idx = 0; idx < args.length; idx++) {
-			if (args[idx].startsWith("-D")) {
-				String[] tmp = args[idx].substring(2).split("=", 2);
-				if (tmp.length == 2) {
-					System.setProperty(tmp[0], tmp[1]);
-				}
-			} else if (idx + 1 < args.length) {
-				System.setProperty(args[idx++], args[idx]);
-			}
-		}
-		String tmp = System.getProperty(CONFIG_PROP);
-		if (tmp != null) {
-			Properties prop = System.getProperties();
-			try (InputStream in = new FileInputStream(new File(tmp))) {
-				prop.load(in);
-			}
-		}
+		ServerMain.configure("SmtpServer", args, CONFIG_PROP);
 		boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
 		int port = Integer.getInteger(P + "port", SMTP_PORT);
 		SmtpServer relay = new SmtpServer(port, SMTP_NAME, secure);
@@ -177,28 +138,11 @@ public class SmtpServer extends Server implements SMTP {
 				return ret;
 			}
 		});
-		setConnectionFactory(new IConnectionFactory() {
-			@Override
-			public IConnection getConnection(Socket socket) throws IOException {
-				return new ServerConnection(socket, true, SmtpServer.this.getLogger().getLevel());
-			}
-		});
 		// sessions read the socket themselves and time out on their own
 		setMaxIdleConnection(Long.MAX_VALUE / 2);
 
-		String tmp = System.getProperty(FILE_SOURCE_PROP, System.getProperty("JPop3.fileSource"));
-		if (tmp != null) {
-			factory = FileSourceFactory.getFileSourceFactory(tmp.toLowerCase(Locale.ROOT));
-		}
-		tmp = System.getProperty(ROOT_PROP, System.getProperty("JPop3.root"));
-		if (tmp == null) {
-			tmp = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win") ? "C:/pop3" : "/pop3";
-		}
-		try {
-			maildropRoot = factory.createFileSource(tmp);
-		} catch (IOException e) {
-			logInfo("Error attempting to set the maildrop root " + tmp);
-		}
+		setRequireTls(Boolean.getBoolean(P + "requireTls"));
+		initMaildropRoot(FILE_SOURCE_PROP, "JPop3.fileSource", ROOT_PROP, "JPop3.root", "/pop3", "C:/pop3");
 
 		hostname = System.getProperty(P + "hostname");
 		if (hostname == null) {
@@ -223,13 +167,13 @@ public class SmtpServer extends Server implements SMTP {
 		c.setPostmaster(System.getProperty(P + "postmaster", "postmaster"));
 		String aliases = System.getProperty(P + "aliases");
 		if (aliases != null) {
-			try (InputStream in = factory.createFileSource(aliases).getInputStream()) {
+			try (InputStream in = getFileSourceFactory().createFileSource(aliases).getInputStream()) {
 				c.loadAliases(new String(in.readAllBytes(), StandardCharsets.UTF_8));
 			} catch (IOException e) {
 				logError("Can't read the aliases file " + aliases, e);
 			}
 		}
-		tmp = System.getProperty(P + "relayHost");
+		String tmp = System.getProperty(P + "relayHost");
 		if (tmp != null && !tmp.isEmpty()) {
 			int colon = tmp.lastIndexOf(':');
 			if (colon > 0) {
@@ -408,28 +352,6 @@ public class SmtpServer extends Server implements SMTP {
 
 	// ------------------------------------------------------------------ mail
 
-	public FileSource getMaildropRoot() throws IOException {
-		if (maildropRoot == null) {
-			throw new IOException("The maildrop root is not configured (see " + ROOT_PROP + ")");
-		}
-		if (!maildropRoot.exists()) {
-			maildropRoot.mkdirs();
-		}
-		return maildropRoot;
-	}
-
-	public void setMaildropRoot(FileSource root) throws IOException {
-		if (!root.exists() && !root.mkdirs()) {
-			throw new IOException("Can't create the maildrop root " + root);
-		}
-		this.maildropRoot = root;
-		this.factory = root.getFileSourceFactory();
-	}
-
-	public FileSourceFactory getFileSourceFactory() {
-		return factory;
-	}
-
 	/** Routing, local domains, aliases and retry settings of the queue this server creates. */
 	public DeliveryConfig getDeliveryConfig() {
 		return queue != null && !ownsQueue ? queue.getConfig() : deliveryConfig;
@@ -476,21 +398,6 @@ public class SmtpServer extends Server implements SMTP {
 		} finally {
 			tmp.delete();
 		}
-	}
-
-	public boolean isTlsAvailable() {
-		Boolean ret = tlsAvailable;
-		if (ret == null) {
-			try {
-				// a key store must be configured: without keys a TLS handshake can only fail
-				javax.net.ssl.KeyManager[] km = getKeyManagers();
-				ret = km != null && km.length > 0 && getSSLContext("TLS") != null;
-			} catch (Exception e) {
-				ret = false;
-			}
-			tlsAvailable = ret;
-		}
-		return ret;
 	}
 
 	/** True if the client address may relay without logging in. */
@@ -548,15 +455,6 @@ public class SmtpServer extends Server implements SMTP {
 	/** Submission mode (RFC 6409): AUTH is required, and Date and Message-ID are added if missing. */
 	public void setSubmission(boolean submission) {
 		this.submission = submission;
-	}
-
-	public boolean isRequireTls() {
-		return requireTls;
-	}
-
-	/** Refuse AUTH (and, in submission mode, MAIL) until STARTTLS. */
-	public void setRequireTls(boolean requireTls) {
-		this.requireTls = requireTls;
 	}
 
 	public long getMaxMessageSize() {

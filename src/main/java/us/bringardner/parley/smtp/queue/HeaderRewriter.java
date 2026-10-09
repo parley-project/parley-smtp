@@ -1,7 +1,6 @@
 package us.bringardner.parley.smtp.queue;
 
-import java.io.BufferedInputStream;
-import java.io.BufferedOutputStream;
+import us.bringardner.parley.io.IoUtils;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -34,8 +33,8 @@ public final class HeaderRewriter {
 	}
 
 	private static void copyWithPrefix(FileSource file, FileSource tmp, String fields) throws IOException {
-		try (InputStream i = new BufferedInputStream(file.getInputStream(), 64 * 1024);
-				OutputStream o = new BufferedOutputStream(tmp.getOutputStream(), 64 * 1024)) {
+		try (InputStream i = IoUtils.buffered(file.getInputStream());
+				OutputStream o = IoUtils.buffered(tmp.getOutputStream())) {
 			o.write(fields.getBytes(StandardCharsets.UTF_8));
 			i.transferTo(o);
 		}
@@ -58,8 +57,8 @@ public final class HeaderRewriter {
 
 	private static void copyInserting(FileSource file, FileSource tmp, String fields, Predicate<HeaderFields.Field> drop)
 			throws IOException {
-		try (InputStream i = new BufferedInputStream(file.getInputStream(), 64 * 1024);
-				OutputStream o = new BufferedOutputStream(tmp.getOutputStream(), 64 * 1024)) {
+		try (InputStream i = IoUtils.buffered(file.getInputStream());
+				OutputStream o = IoUtils.buffered(tmp.getOutputStream())) {
 			HeaderFields h = HeaderFields.read(i);
 			List<HeaderFields.Field> all = h.getFields();
 			boolean inserted = false;

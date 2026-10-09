@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Locale;
 
+import us.bringardner.parley.mail.Sasl;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 
 /**
@@ -52,12 +53,12 @@ public class Auth extends BaseCommand {
 			if (decoded == null) {
 				return;
 			}
-			String[] parts = new String(decoded, StandardCharsets.UTF_8).split("\u0000", -1);
-			if (parts.length != 3 || (!parts[0].isEmpty() && !parts[0].equals(parts[1]))) {
+			String[] credentials = Sasl.parsePlain(decoded);
+			if (credentials == null) {
 				p.authFailed();
 				return;
 			}
-			result(p, parts[1], parts[2]);
+			result(p, credentials[0], credentials[1]);
 		} else if (mechanism.equals("LOGIN")) {
 			String user = initial != null ? initial : challenge(p, USERNAME);
 			if (user == null) {
@@ -98,11 +99,8 @@ public class Auth extends BaseCommand {
 	}
 
 	private static byte[] decode(SmtpRequestProcessor p, String b64) throws IOException {
-		if (b64.equals("=")) {
-			return new byte[0];
-		}
 		try {
-			return Base64.getDecoder().decode(b64);
+			return Sasl.decodeResponse(b64);
 		} catch (IllegalArgumentException e) {
 			p.error(PARAMETER_ERROR, "5.5.2", "Invalid base64 data");
 			return null;

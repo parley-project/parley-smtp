@@ -1,6 +1,6 @@
 package us.bringardner.parley.smtp.server;
 
-import java.io.BufferedInputStream;
+import us.bringardner.parley.io.LineTooLongException;
 import java.io.BufferedOutputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
@@ -20,9 +20,8 @@ import java.util.Map;
 import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.mail.Rfc2822Date;
-import us.bringardner.parley.mail.SaslPrep;
 import us.bringardner.parley.net.IConnection;
-import us.bringardner.parley.net.server.AbstractCommandProcessor;
+import us.bringardner.parley.mail.server.AbstractMailProcessor;
 import us.bringardner.parley.net.server.ICommand;
 import us.bringardner.parley.net.server.IPrincipal;
 import us.bringardner.parley.smtp.MailAddress;
@@ -51,7 +50,7 @@ import us.bringardner.parley.io.IoUtils;
  * Replies are flushed only when no more pipelined commands are waiting
  * (PIPELINING, RFC 2920).
  */
-public class SmtpRequestProcessor extends AbstractCommandProcessor implements SMTP {
+public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP {
 
 	private static final long serialVersionUID = 1L;
 
@@ -95,7 +94,6 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	private boolean esmtp;
 	private Transaction transaction;
 	private int errors;
-	private int authFailures;
 	private volatile boolean closing;
 
 	public SmtpRequestProcessor() {
@@ -147,7 +145,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 					flush();
 				}
 				return;
-			} catch (SmtpInput.LineTooLongException e) {
+			} catch (LineTooLongException e) {
 				error(SYNTAX_ERROR, "5.5.6", "Line too long");
 				continue;
 			}
@@ -327,11 +325,6 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 		return esmtp;
 	}
 
-	public boolean isTls() {
-		IConnection con = getConnection();
-		return con != null && con.isSecure();
-	}
-
 	public boolean isAuthenticated() {
 		return getPrincipal() != null;
 	}
@@ -380,9 +373,13 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	}
 
 	/** STARTTLS: negotiate TLS and forget everything known about the client (RFC 3207 section 4.2). */
-	public void startTls() throws IOException {
+	@Override
+	protected void beforeTls() throws IOException {
 		flush();
-		getConnection().negotiateSecureSocket("TLS");
+	}
+
+	@Override
+	protected void afterTls() throws IOException {
 		openStreams();
 		helo = null;
 		esmtp = false;
@@ -397,12 +394,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	 * WRITE permission to send mail.
 	 */
 	public boolean login(String user, String password) {
-		user = SaslPrep.prepare(user, false);
-		password = SaslPrep.prepare(password, false);
-		if (user == null || password == null || user.isEmpty()) {
-			return false;
-		}
-		IPrincipal p = getServer().authenticate(user, password.getBytes(StandardCharsets.UTF_8));
+		IPrincipal p = authenticate(user, password);
 		if (p == null || !getServer().isAuthorized(p, SmtpCommand.SEND_PERMISSION)) {
 			return false;
 		}
@@ -412,15 +404,8 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 
 	/** Reply to a failed AUTH; the connection is closed after too many. */
 	public void authFailed() throws IOException {
-		int delay = getSmtpServer().getLoginFailureDelay();
-		if (delay > 0) {
-			try {
-				Thread.sleep(delay);
-			} catch (InterruptedException e) {
-				Thread.currentThread().interrupt();
-			}
-		}
-		if (getSmtpServer().isTooManyLoginFailures(++authFailures)) {
+		loginFailedDelay();
+		if (tooManyLoginFailures()) {
 			reply(SERVICE_NOT_AVAILABLE, "4.7.0", "Too many authentication failures");
 			closing = true;
 		} else {
@@ -449,7 +434,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	private void openContent(Transaction t) throws IOException {
 		t.id = MailQueue.newId();
 		t.incoming = getQueue().incoming(t.id);
-		t.out = new BufferedOutputStream(t.incoming.getOutputStream(), 64 * 1024);
+		t.out = IoUtils.buffered(t.incoming.getOutputStream());
 		String client = getClientAddress().getHostAddress();
 		if (client.indexOf(':') >= 0) {
 			int zone = client.indexOf('%');
@@ -525,8 +510,8 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	private void normalize(Transaction t) throws IOException {
 		FileSource src = t.incoming;
 		FileSource dst = getQueue().incoming(t.id + "n");
-		try (InputStream i = new BufferedInputStream(src.getInputStream(), 64 * 1024);
-				OutputStream o = new BufferedOutputStream(dst.getOutputStream(), 64 * 1024);
+		try (InputStream i = IoUtils.buffered(src.getInputStream());
+				OutputStream o = IoUtils.buffered(dst.getOutputStream());
 				SmtpStreams.CrlfOutputStream c = new SmtpStreams.CrlfOutputStream(o)) {
 			i.transferTo(c);
 		}
@@ -647,7 +632,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 		String host = getSmtpServer().getHostname();
 		List<DkimResult> results = new ArrayList<>();
 		if (dkim) {
-			try (InputStream i = new BufferedInputStream(t.incoming.getInputStream(), 64 * 1024)) {
+			try (InputStream i = IoUtils.buffered(t.incoming.getInputStream())) {
 				results = config.getDkim().verify(i);
 			} catch (IOException | RuntimeException e) {
 				logError("DKIM verification of " + t.id + " failed", e);
@@ -655,7 +640,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 		}
 		ArcResult arc = null;
 		if (arcOn) {
-			try (InputStream i = new BufferedInputStream(t.incoming.getInputStream(), 64 * 1024)) {
+			try (InputStream i = IoUtils.buffered(t.incoming.getInputStream())) {
 				arc = config.getArc().verifier(config.getDkim()).verify(i);
 			} catch (IOException | RuntimeException e) {
 				logError("ARC validation of " + t.id + " failed", e);
@@ -664,7 +649,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 		DmarcResult dmarc = null;
 		HeaderFields headers = null;
 		if (dmarcOn) {
-			try (InputStream i = new BufferedInputStream(t.incoming.getInputStream(), 64 * 1024)) {
+			try (InputStream i = IoUtils.buffered(t.incoming.getInputStream())) {
 				headers = HeaderFields.read(i);
 				dmarc = config.getDmarc().checker().check(headers, t.spf, results);
 			} catch (IOException | RuntimeException e) {
@@ -777,8 +762,8 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 	private void insertAfterTrace(Transaction t, String headers) throws IOException {
 		FileSource src = t.incoming;
 		FileSource dst = getQueue().incoming(t.id + "h");
-		try (InputStream i = new BufferedInputStream(src.getInputStream(), 64 * 1024);
-				OutputStream o = new BufferedOutputStream(dst.getOutputStream(), 64 * 1024)) {
+		try (InputStream i = IoUtils.buffered(src.getInputStream());
+				OutputStream o = IoUtils.buffered(dst.getOutputStream())) {
 			// copy the Received field (it ends at the first line not starting with white space)
 			int prev = -1;
 			int b;
@@ -810,7 +795,7 @@ public class SmtpRequestProcessor extends AbstractCommandProcessor implements SM
 
 		static HeaderScan of(FileSource f) throws IOException {
 			HeaderScan s = new HeaderScan();
-			try (InputStream in = new BufferedInputStream(f.getInputStream(), 64 * 1024)) {
+			try (InputStream in = IoUtils.buffered(f.getInputStream())) {
 				StringBuilder line = new StringBuilder();
 				long total = 0;
 				int b;
