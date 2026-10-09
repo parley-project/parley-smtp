@@ -764,27 +764,46 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		FileSource dst = getQueue().incoming(t.id + "h");
 		try (InputStream i = IoUtils.buffered(src.getInputStream());
 				OutputStream o = IoUtils.buffered(dst.getOutputStream())) {
-			// copy the Received field (it ends at the first line not starting with white space)
-			int prev = -1;
-			int b;
-			boolean done = false;
-			while (!done && (b = i.read()) >= 0) {
-				if (prev == '\n' && b != ' ' && b != '\t') {
-					o.write(headers.getBytes(StandardCharsets.UTF_8));
-					done = true;
-				}
-				o.write(b);
-				prev = b;
-			}
-			if (!done) {
-				o.write(headers.getBytes(StandardCharsets.UTF_8));
-			}
-			i.transferTo(o);
+			copyInsertingAfterTrace(i, o, headers.getBytes(StandardCharsets.UTF_8));
 		}
 		src.delete();
 		if (!dst.renameTo(src)) {
 			throw new IOException("Can't store the message");
 		}
+	}
+
+	/**
+	 * Copy {@code in} to {@code out} with {@code added} after the first header field
+	 * (the field ends at the first line that doesn't start with white space), a block at a time.
+	 */
+	static void copyInsertingAfterTrace(InputStream in, OutputStream out, byte[] added) throws IOException {
+		byte[] buf = new byte[8192];
+		int prev = -1;
+		boolean done = false;
+		int n;
+		while (!done && (n = in.read(buf)) > 0) {
+			int cut = -1;
+			for (int k = 0; k < n; k++) {
+				int b = buf[k] & 0xff;
+				if (prev == '\n' && b != ' ' && b != '\t') {
+					cut = k;
+					break;
+				}
+				prev = b;
+			}
+			if (cut < 0) {
+				out.write(buf, 0, n);
+			} else {
+				out.write(buf, 0, cut);
+				out.write(added);
+				out.write(buf, cut, n - cut);
+				done = true;
+			}
+		}
+		if (!done) {
+			out.write(added);
+		}
+		in.transferTo(out);
 	}
 
 	/** What the header block of a message has. */
@@ -794,32 +813,73 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		boolean messageId;
 
 		static HeaderScan of(FileSource f) throws IOException {
+			try (InputStream in = f.getInputStream()) {
+				return of(in);
+			}
+		}
+
+		/** The header block of the message in {@code in}; stops at the first blank line (or after 4 MB). */
+		static HeaderScan of(InputStream in) throws IOException {
 			HeaderScan s = new HeaderScan();
-			try (InputStream in = IoUtils.buffered(f.getInputStream())) {
-				StringBuilder line = new StringBuilder();
-				long total = 0;
-				int b;
-				while ((b = in.read()) >= 0 && total++ < 4 * 1024 * 1024) {
+			byte[] buf = new byte[8192];
+			// only the start of a line matters, and the longest field name we look for is 11 chars
+			byte[] head = new byte[12];
+			int headLen = 0;
+			boolean blank = true;		// nothing but white space so far on this line
+			long total = 0;
+			int n;
+			while (total < MAX_HEADER_SCAN && (n = in.read(buf)) > 0) {
+				int end = (int) Math.min(n, MAX_HEADER_SCAN - total);
+				total += end;
+				for (int k = 0; k < end; k++) {
+					byte b = buf[k];
 					if (b == '\n') {
-						String l = line.toString().trim();
-						if (l.isEmpty()) {
-							break;
+						if (blank) {
+							return s;
 						}
-						String lower = line.toString().toLowerCase(Locale.ROOT);
-						if (lower.startsWith("received:")) {
-							s.received++;
-						} else if (lower.startsWith("date:")) {
-							s.date = true;
-						} else if (lower.startsWith("message-id:")) {
-							s.messageId = true;
-						}
-						line.setLength(0);
-					} else if (line.length() < 64) {
-						line.append((char) b);
+						s.field(head, headLen);
+						headLen = 0;
+						blank = true;
+						continue;
+					}
+					if ((b & 0xff) > ' ') {
+						blank = false;
+					}
+					if (headLen < head.length) {
+						head[headLen++] = b;
 					}
 				}
 			}
 			return s;
+		}
+
+		private static final long MAX_HEADER_SCAN = 4L * 1024 * 1024;
+
+		private void field(byte[] head, int len) {
+			if (startsWith(head, len, "received:")) {
+				received++;
+			} else if (startsWith(head, len, "date:")) {
+				date = true;
+			} else if (startsWith(head, len, "message-id:")) {
+				messageId = true;
+			}
+		}
+
+		/** Case-insensitive (ASCII) prefix test; {@code prefix} is lower case. */
+		private static boolean startsWith(byte[] b, int len, String prefix) {
+			if (len < prefix.length()) {
+				return false;
+			}
+			for (int i = 0; i < prefix.length(); i++) {
+				int c = b[i];
+				if (c >= 'A' && c <= 'Z') {
+					c += 'a' - 'A';
+				}
+				if (c != prefix.charAt(i)) {
+					return false;
+				}
+			}
+			return true;
 		}
 	}
 
