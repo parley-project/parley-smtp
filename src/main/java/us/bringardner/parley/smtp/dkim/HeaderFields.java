@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -109,15 +110,19 @@ public final class HeaderFields {
 	 */
 	public static HeaderFields read(InputStream in) throws IOException {
 		List<Field> fields = new ArrayList<>();
-		ByteArrayOutputStream line = new ByteArrayOutputStream(256);
+		//  a line at a time, in an array that grows: ByteArrayOutputStream.write(int) is synchronized
+		byte[] line = new byte[256];
 		StringBuilder field = null;
 		long total = 0;
 		boolean hasBody = false;
 		while (true) {
-			line.reset();
+			int len = 0;
 			int b;
 			while ((b = in.read()) >= 0) {
-				line.write(b);
+				if (len == line.length) {
+					line = Arrays.copyOf(line, len * 2);
+				}
+				line[len++] = (byte) b;
 				if (++total > MAX_HEADER_BYTES) {
 					throw new IOException("The message header is larger than " + MAX_HEADER_BYTES + " bytes");
 				}
@@ -125,10 +130,10 @@ public final class HeaderFields {
 					break;
 				}
 			}
-			if (line.size() == 0) {
+			if (len == 0) {
 				break; // end of the message
 			}
-			String text = new String(line.toByteArray(), StandardCharsets.ISO_8859_1);
+			String text = new String(line, 0, len, StandardCharsets.ISO_8859_1);
 			if (text.equals("\r\n") || text.equals("\n")) {
 				hasBody = true;
 				break;
