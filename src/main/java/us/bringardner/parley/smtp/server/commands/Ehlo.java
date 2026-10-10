@@ -2,11 +2,12 @@ package us.bringardner.parley.smtp.server.commands;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
+import us.bringardner.parley.net.capability.CapabilityRegistry;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
-import us.bringardner.parley.smtp.server.SmtpServer;
 
 /** EHLO domain (RFC 5321 section 4.1.1.1): start an ESMTP session and list the extensions. */
 public class Ehlo extends BaseCommand {
@@ -20,6 +21,31 @@ public class Ehlo extends BaseCommand {
 	protected Ehlo(String name) {
 		super(name);
 	}
+
+	/**
+	 * The extensions this server offers and when (RFC 1869): STARTTLS only before TLS, AUTH only
+	 * until the user has authenticated and not while TLS must come first.
+	 */
+	private static final CapabilityRegistry EXTENSIONS = new CapabilityRegistry()
+			.add(EXT_PIPELINING)
+			.addDynamic(EXT_SIZE, p -> Collections.singletonList(
+					String.valueOf(((SmtpRequestProcessor) p).getSmtpServer().getMaxMessageSize())))
+			.add(EXT_8BITMIME)
+			.add(EXT_SMTPUTF8)
+			.add(EXT_ENHANCEDSTATUSCODES)
+			.add(EXT_CHUNKING)
+			.add(EXT_BINARYMIME)
+			.add(EXT_DSN)
+			.addWhen(p -> {
+				SmtpRequestProcessor sp = (SmtpRequestProcessor) p;
+				return !sp.isTls() && sp.getSmtpServer().isTlsAvailable();
+			}, EXT_STARTTLS)
+			.addDynamicRequireParams(EXT_AUTH, p -> {
+				SmtpRequestProcessor sp = (SmtpRequestProcessor) p;
+				boolean open = !sp.isAuthenticated() && (sp.isTls() || !sp.getSmtpServer().isRequireTls());
+				return open ? Auth.mechanisms(sp) : null;
+			})
+			.add("HELP");
 
 	/** True for a domain or address literal (lenient: any non-empty name without spaces is accepted). */
 	static boolean validName(String name) {
@@ -35,24 +61,9 @@ public class Ehlo extends BaseCommand {
 			return;
 		}
 		p.hello(name, true);
-		SmtpServer s = p.getSmtpServer();
 		List<String> lines = new ArrayList<>();
-		lines.add(s.getHostname() + " Hello " + name + " [" + p.getClientAddress().getHostAddress() + "]");
-		lines.add(EXT_PIPELINING);
-		lines.add(EXT_SIZE + " " + s.getMaxMessageSize());
-		lines.add(EXT_8BITMIME);
-		lines.add(EXT_SMTPUTF8);
-		lines.add(EXT_ENHANCEDSTATUSCODES);
-		lines.add(EXT_CHUNKING);
-		lines.add(EXT_BINARYMIME);
-		lines.add(EXT_DSN);
-		if (!p.isTls() && s.isTlsAvailable()) {
-			lines.add(EXT_STARTTLS);
-		}
-		if (!p.isAuthenticated() && (p.isTls() || !s.isRequireTls())) {
-			lines.add(EXT_AUTH + " PLAIN LOGIN");
-		}
-		lines.add("HELP");
+		lines.add(p.getSmtpServer().getHostname() + " Hello " + name + " [" + p.getClientAddress().getHostAddress() + "]");
+		lines.addAll(EXTENSIONS.resolve(p).toLines());
 		p.reply(OK, lines);
 	}
 }

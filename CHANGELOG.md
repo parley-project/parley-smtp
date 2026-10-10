@@ -22,6 +22,16 @@ The SMTP server, queue, DKIM, SPF, DMARC and ARC code of BjlEmail (`us.bringardn
   `bjldns-iterative` still work.
 - The server's greeting, `Received:` headers and DMARC report `User-Agent` say `Parley` instead of `BjlEmail`.
 
+### Internal
+
+- AUTH runs through parley-net's `SaslServerDriver`, with `SmtpSaslAuthenticator` supplying the
+  login, and the EHLO extension list is built from a `CapabilityRegistry`. The replies, status
+  codes and the advertised `AUTH PLAIN LOGIN` are the same as before. Requires a parley-net that
+  has the `capability` and `sasl` packages.
+- The session state checks (HELO before MAIL, MAIL before RCPT, ...) stay in the commands: BDAT
+  must read and discard its chunk before it can answer a bad sequence, and DATA with no
+  recipients is a 554, not a 503, so a state check ahead of the command doesn't fit SMTP.
+
 ### Unchanged
 
 - The `JSmtp.*` / `SmtpServer.*` properties and the queue files on disk (header `BJLQUEUE 1`).
