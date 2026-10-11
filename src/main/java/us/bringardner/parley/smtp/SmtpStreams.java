@@ -63,73 +63,20 @@ public final class SmtpStreams {
 	}
 
 	/**
-	 * DATA content for sending (RFC 5321 section 4.5.2): line ends become CRLF, a
-	 * "." starting a line is doubled, and {@link #finish()} ends the content with
-	 * CRLF "." CRLF.
+	 * DATA content for sending (RFC 5321 section 4.5.2): line ends become CRLF (a bare CR too), a
+	 * "." starting a line is doubled, and {@link #finish()} ends the content with CRLF "." CRLF.
+	 * This is {@link us.bringardner.parley.io.DotStuffingOutputStream} with bare CR normalized;
+	 * unlike that class, closing only flushes, because the caller decides when the data ends and
+	 * the stream under it is the connection.
 	 */
-	public static final class DotStuffingOutputStream extends FilterOutputStream {
-		private boolean lineStart = true;
-		private boolean pendingCr;
+	public static final class DotStuffingOutputStream extends us.bringardner.parley.io.DotStuffingOutputStream {
 
 		public DotStuffingOutputStream(OutputStream out) {
-			super(out);
-		}
-
-		@Override
-		public void write(int b) throws IOException {
-			if (pendingCr) {
-				pendingCr = false;
-				newline();
-				if (b == '\n') {
-					return;
-				}
-			}
-			if (b == '\r') {
-				pendingCr = true;
-				return;
-			}
-			if (b == '\n') {
-				newline();
-				return;
-			}
-			if (lineStart && b == '.') {
-				out.write('.');
-			}
-			out.write(b);
-			lineStart = false;
-		}
-
-		private void newline() throws IOException {
-			out.write('\r');
-			out.write('\n');
-			lineStart = true;
-		}
-
-		@Override
-		public void write(byte[] b, int off, int len) throws IOException {
-			for (int i = off; i < off + len; i++) {
-				write(b[i]);
-			}
-		}
-
-		/** Write the end-of-data line (adding a CRLF if the content didn't end with one). */
-		public void finish() throws IOException {
-			if (pendingCr) {
-				pendingCr = false;
-				newline();
-			}
-			if (!lineStart) {
-				newline();
-			}
-			out.write('.');
-			out.write('\r');
-			out.write('\n');
-			out.flush();
+			super(out, true);
 		}
 
 		@Override
 		public void close() throws IOException {
-			// the caller decides when the data ends
 			flush();
 		}
 	}
