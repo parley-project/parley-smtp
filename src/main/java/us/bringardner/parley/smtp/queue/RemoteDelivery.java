@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.net.sasl.ISaslClient;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.MailPath;
 import us.bringardner.parley.io.IoUtils;
@@ -141,7 +142,10 @@ public final class RemoteDelivery {
 				throw new HostFailure(new DeliveryException(false, "4.7.0", route.host + " doesn't offer STARTTLS", null, mta));
 			}
 			if (smartHost && config.getRelayUser() != null) {
-				r = c.authPlain(config.getRelayUser(), config.getRelayPassword() == null ? "" : config.getRelayPassword());
+				String password = config.getRelayPassword() == null ? "" : config.getRelayPassword();
+				ISaslClient sasl = config.getRelayAuthMechanisms().isEmpty() ? null
+						: c.chooseSasl(config.getRelayUser(), password, config.getRelayAuthMechanisms());
+				r = sasl != null ? c.authenticate(sasl) : c.authPlain(config.getRelayUser(), password);
 				if (r.code != 235) {
 					throw new HostFailure(new DeliveryException(false, "4.7.0", "The smart host refused the login: " + r,
 							"smtp; " + r, mta));

@@ -185,6 +185,10 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 		c.setRelayUser(System.getProperty(P + "relayUser"));
 		c.setRelayPassword(System.getProperty(P + "relayPassword"));
+		tmp = System.getProperty(P + "relayAuth");
+		if (tmp != null && !tmp.trim().isEmpty()) {
+			c.setRelayAuthMechanisms(java.util.Arrays.asList(tmp.trim().split("\\s*,\\s*")));
+		}
 		tmp = System.getProperty(P + "relayTls");
 		if (tmp != null) {
 			c.setRelayTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));

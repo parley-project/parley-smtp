@@ -47,6 +47,7 @@ public class DeliveryConfig {
 	private int relayPort = 587;
 	private String relayUser;
 	private String relayPassword;
+	private List<String> relayAuthMechanisms = new ArrayList<>();
 	private TlsMode tlsMode = TlsMode.OPPORTUNISTIC;
 	private TlsMode relayTlsMode = TlsMode.REQUIRED;
 
@@ -196,6 +197,21 @@ public class DeliveryConfig {
 
 	public String getRelayPassword() {
 		return relayPassword;
+	}
+
+	/**
+	 * SASL mechanisms to log in to the smart host with, best first (SCRAM-SHA-256, SCRAM-SHA-1,
+	 * CRAM-MD5, PLAIN, LOGIN). The first one the smart host offers is used. Empty (the default)
+	 * means AUTH PLAIN. With SCRAM the password is never sent, and the smart host has to prove
+	 * it knows it.
+	 */
+	public List<String> getRelayAuthMechanisms() {
+		return relayAuthMechanisms;
+	}
+
+	public void setRelayAuthMechanisms(List<String> relayAuthMechanisms) {
+		this.relayAuthMechanisms = relayAuthMechanisms == null ? new ArrayList<>()
+				: new ArrayList<>(relayAuthMechanisms);
 	}
 
 	public void setRelayPassword(String relayPassword) {

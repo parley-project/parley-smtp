@@ -2,6 +2,11 @@ package us.bringardner.parley.smtp.queue;
 
 import us.bringardner.parley.io.IoUtils;
 import us.bringardner.parley.mail.Sasl;
+import us.bringardner.parley.mail.SaslPrep;
+import us.bringardner.parley.net.capability.CapabilitySet;
+import us.bringardner.parley.net.sasl.ISaslClient;
+import us.bringardner.parley.net.sasl.SaslClients;
+import us.bringardner.parley.net.sasl.SaslEncoding;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -71,6 +76,7 @@ public class SmtpClient implements Closeable {
 	private OutputStream out;
 	private boolean tls;
 	private final Map<String, String> extensions = new LinkedHashMap<>();
+	private CapabilitySet capabilities = new CapabilitySet();
 	private boolean esmtp;
 
 	public SmtpClient(String host, int port, int connectTimeout, int readTimeout) throws IOException {
@@ -108,6 +114,14 @@ public class SmtpClient implements Closeable {
 	/** Extensions from the last EHLO, by upper-case keyword, with their parameters. */
 	public Map<String, String> getExtensions() {
 		return extensions;
+	}
+
+	/**
+	 * The extensions from the last EHLO with their parameters, as a {@link CapabilitySet}:
+	 * {@code getCapabilities().has("AUTH", "PLAIN")}.
+	 */
+	public CapabilitySet getCapabilities() {
+		return capabilities;
 	}
 
 	public boolean supports(String extension) {
@@ -158,8 +172,11 @@ public class SmtpClient implements Closeable {
 	public Reply hello(String name) throws IOException {
 		Reply r = command("EHLO " + name);
 		extensions.clear();
+		capabilities = new CapabilitySet();
 		if (r.code == 250) {
 			esmtp = true;
+			// the first line greets; the others are extensions
+			capabilities = CapabilitySet.parseLines(r.lines.subList(1, r.lines.size()));
 			for (int i = 1; i < r.lines.size(); i++) {
 				String l = r.lines.get(i).trim();
 				int sp = l.indexOf(' ');
@@ -205,6 +222,67 @@ public class SmtpClient implements Closeable {
 	/** AUTH PLAIN (RFC 4954, RFC 4616). */
 	public Reply authPlain(String user, String password) throws IOException {
 		return command("AUTH PLAIN " + Sasl.encodePlain(user, password));
+	}
+
+	/** Most challenges answered before giving up on a server that never finishes. */
+	private static final int MAX_AUTH_ROUNDS = 8;
+
+	/**
+	 * AUTH with a SASL mechanism (RFC 4954): the initial response goes with the command, and each
+	 * 334 reply is a challenge for the mechanism. Returns the final reply (235 on success).
+	 * <p>
+	 * A mechanism that checks the server (SCRAM) must be complete when the server says 235;
+	 * if it isn't, the server accepted the login without proving it knows the password, and an
+	 * IOException is thrown.
+	 */
+	public Reply authenticate(ISaslClient sasl) throws IOException {
+		String cmd = "AUTH " + sasl.getName();
+		if (sasl.hasInitialResponse()) {
+			byte[] ir = sasl.initialResponse();
+			cmd += " " + (ir.length == 0 ? "=" : SaslEncoding.encode(ir));
+		}
+		Reply r = command(cmd);
+		for (int round = 0; r.code == 334; round++) {
+			IOException failure = null;
+			byte[] response = null;
+			if (round >= MAX_AUTH_ROUNDS) {
+				failure = new IOException(host + " sent too many AUTH challenges");
+			} else {
+				try {
+					response = sasl.evaluateChallenge(SaslEncoding.decode(r.lines.isEmpty() ? "" : r.lines.get(0)));
+				} catch (IllegalArgumentException e) {
+					failure = new IOException("Invalid AUTH challenge from " + host);
+				} catch (IOException e) {
+					failure = e;
+				}
+			}
+			if (failure != null) {
+				command("*"); // cancel; the server answers 501
+				throw failure;
+			}
+			r = command(SaslEncoding.encode(response));
+		}
+		if (r.code == 235 && !sasl.isComplete()) {
+			throw new IOException(host + " accepted the login without completing " + sasl.getName());
+		}
+		return r;
+	}
+
+	/**
+	 * The mechanism to log in with: the first of {@code preferred} that the server offered in
+	 * its AUTH extension and that {@link SaslClients} can make. User name and password are
+	 * prepared with SASLprep (RFC 4013), which servers apply to what they store; text that can't
+	 * be prepared isn't used.
+	 *
+	 * @return a client for {@link #authenticate(ISaslClient)}, or null if there is no match
+	 */
+	public ISaslClient chooseSasl(String user, String password, List<String> preferred) {
+		String u = SaslPrep.prepare(user, false);
+		String p = SaslPrep.prepare(password, false);
+		if (u == null || p == null) {
+			return null;
+		}
+		return SaslClients.choose(capabilities.getParams("AUTH"), preferred, u, p);
 	}
 
 	/** DATA content (dot-stuffed, ending with "."); returns the final reply. */

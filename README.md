@@ -225,6 +225,7 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 | `JSmtp.timeout` | 300000 ms | Idle session timeout (RFC 5321 requires at least 5 minutes) |
 | `JSmtp.aliases`, `JSmtp.postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
 | `JSmtp.relayHost`, `JSmtp.relayUser`, `JSmtp.relayPassword`, `JSmtp.relayTls` | none, none, none, `required` | Smart host |
+| `JSmtp.relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
 | `JSmtp.resolver`, `JSmtp.dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns` |
 | `JSmtp.preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
 | `JSmtp.tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |

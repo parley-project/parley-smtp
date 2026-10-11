@@ -22,6 +22,15 @@ The SMTP server, queue, DKIM, SPF, DMARC and ARC code of BjlEmail (`us.bringardn
   `bjldns-iterative` still work.
 - The server's greeting, `Received:` headers and DMARC report `User-Agent` say `Parley` instead of `BjlEmail`.
 
+### Added
+
+- `JSmtp.relayAuth` / `DeliveryConfig.setRelayAuthMechanisms`: SASL mechanisms for logging in to the
+  smart host, best first (SCRAM-SHA-256, SCRAM-SHA-1, CRAM-MD5, PLAIN, LOGIN). The first one the
+  smart host offers is used. The default (none) is AUTH PLAIN as before.
+- `SmtpClient.authenticate(ISaslClient)`, `chooseSasl(...)` and `getCapabilities()` (the EHLO
+  extensions as a parley-net `CapabilitySet`). A SCRAM login fails if the server says 235 without
+  having proved it knows the password.
+
 ### Internal
 
 - AUTH runs through parley-net's `SaslServerDriver`, with `SmtpSaslAuthenticator` supplying the
