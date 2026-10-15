@@ -74,8 +74,8 @@
 	<distributionManagement>
 		<repository>
 			<id>github</id>
-			<name>tony-bringardner</name>
-			<url>https://maven.pkg.github.com/tony-bringardner/parley-smtp</url>
+			<name>parley-project</name>
+			<url>https://maven.pkg.github.com/parley-project/parley-smtp</url>
 		</repository>
 	</distributionManagement>
 
