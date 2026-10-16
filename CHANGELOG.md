@@ -1,6 +1,6 @@
 # Changelog
 
-## parley-smtp 1.0.0 (unreleased)
+## parley-smtp 1.0.0 (2026-10-16)
 
 The SMTP server, queue, DKIM, SPF, DMARC and ARC code of BjlEmail (`us.bringardner:bjl_email`
 1.0.0-SNAPSHOT, never released) is now **parley-smtp**, part of the Parley library family.
