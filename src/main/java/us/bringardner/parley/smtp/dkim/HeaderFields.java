@@ -1,6 +1,5 @@
 package us.bringardner.parley.smtp.dkim;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;

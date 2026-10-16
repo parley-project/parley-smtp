@@ -2,10 +2,12 @@ package us.bringardner.parley.smtp.queue;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -104,7 +106,8 @@ public class ParleyDnsMxResolver implements MxResolver {
 		List<InetAddress> ret = new ArrayList<>();
 		File f = new File("/etc/resolv.conf");
 		if (f.isFile()) {
-			try (BufferedReader r = new BufferedReader(new FileReader(f))) {
+			// ISO-8859-1 reads any byte; the lines that matter are ASCII
+			try (BufferedReader r = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.ISO_8859_1))) {
 				String line;
 				while ((line = r.readLine()) != null) {
 					String[] p = line.trim().split("\\s+");
