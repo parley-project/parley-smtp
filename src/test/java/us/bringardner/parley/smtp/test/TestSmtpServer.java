@@ -51,7 +51,16 @@ import us.bringardner.parley.pop3.test.TestPop3Server;
  */
 public class TestSmtpServer {
 
-	private static final String KEYSTORE = "target/pop3keystore.p12";
+	private static final String KEYSTORE = scratchFile("pop3keystore.p12");
+
+	/** A file in this run's own folder under the temp directory, so tests don't depend on target/ or the working directory. */
+	private static String scratchFile(String name) {
+		try {
+			return java.nio.file.Files.createTempDirectory("parley-smtp-tests").resolve(name).toString();
+		} catch (java.io.IOException e) {
+			throw new java.io.UncheckedIOException(e);
+		}
+	}
 
 	private static SmtpServer a;
 	private static SmtpServer submission;
