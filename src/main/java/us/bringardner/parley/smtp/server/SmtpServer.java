@@ -49,7 +49,6 @@ import us.bringardner.parley.smtp.queue.QueueEntry;
  */
 public class SmtpServer extends AbstractMailServer implements SMTP {
 
-	private static final long serialVersionUID = 1L;
 
 	public static final String SMTP_NAME = "JSmtp";
 	public static final String CONFIG_PROP = SMTP_NAME + ".properties";

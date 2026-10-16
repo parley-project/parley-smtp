@@ -88,9 +88,10 @@ public class TestSmtpParts {
 	@Test
 	public void testDotStuffing() throws IOException {
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
-		SmtpStreams.DotStuffingOutputStream d = new SmtpStreams.DotStuffingOutputStream(out);
-		d.write(".start\n.\nend".getBytes(StandardCharsets.US_ASCII));
-		d.finish();
+		try (SmtpStreams.DotStuffingOutputStream d = new SmtpStreams.DotStuffingOutputStream(out)) {
+			d.write(".start\n.\nend".getBytes(StandardCharsets.US_ASCII));
+			d.finish();
+		}
 		assertEquals("..start\r\n..\r\nend\r\n.\r\n", out.toString(StandardCharsets.US_ASCII));
 		// round trip through the reader
 		SmtpInput in = new SmtpInput(new ByteArrayInputStream(out.toByteArray()));
