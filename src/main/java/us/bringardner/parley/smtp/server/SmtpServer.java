@@ -300,15 +300,15 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	// ------------------------------------------------------------------ life cycle
 
+	/** The queue starts once the store is claimed (so it never delivers from a store another server owns). */
 	@Override
-	public synchronized void start() {
+	protected void storeClaimed() throws IOException {
 		try {
 			startQueue();
 		} catch (IOException e) {
 			logError("Can't start the mail queue", e);
-			throw new java.io.UncheckedIOException(e);
+			throw e;
 		}
-		super.start();
 	}
 
 	private synchronized void startQueue() throws IOException {
@@ -341,15 +341,13 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 	}
 
+	/** The queue stops after connections and before the store claim is given up. */
 	@Override
-	public void stop() {
-		super.stop();
-		synchronized (this) {
-			if (queueStarted) {
-				getDeliveryConfig().getDmarc().getReporter().stop();
-				queue.stop();
-				queueStarted = false;
-			}
+	protected synchronized void releasingStore() {
+		if (queueStarted) {
+			getDeliveryConfig().getDmarc().getReporter().stop();
+			queue.stop();
+			queueStarted = false;
 		}
 	}
 

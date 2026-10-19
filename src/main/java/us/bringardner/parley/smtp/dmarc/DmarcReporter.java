@@ -12,6 +12,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -24,6 +25,11 @@ import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
 
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.mail.store.MailLocks;
+import us.bringardner.parley.mail.store.MailboxRegistry;
+import us.bringardner.parley.net.lock.LockDomain;
+import us.bringardner.parley.net.lock.NamedLock;
+import us.bringardner.parley.net.lock.Sharing;
 import us.bringardner.parley.dns.resolve.LookupResult;
 import us.bringardner.parley.smtp.dkim.DkimResult;
 import us.bringardner.parley.smtp.dkim.HeaderFields;
@@ -71,6 +77,12 @@ public final class DmarcReporter {
 	private FileSource dir;
 	private Sender sender;
 	private ScheduledExecutorService timer;
+	/** The lock domain of the report directory while running, or null (no locks). */
+	private volatile LockDomain domain;
+	/** This reporter's part of the log file names when the directory is shared. */
+	private volatile String tag;
+	/** When the last reports went out (shared directories only). */
+	static final String LAST_SENT = ".last-sent";
 
 	// ------------------------------------------------------------------ settings
 
@@ -148,6 +160,11 @@ public final class DmarcReporter {
 			dir.mkdirs();
 		}
 		this.dir = dir;
+		LockDomain d = MailboxRegistry.get().domainOf(dir);
+		if (d != null) {
+			domain = MailLocks.acquire(d.root()); // our own reference, released by stop()
+		}
+		tag = Long.toString(RANDOM.nextLong() & Long.MAX_VALUE, 36);
 		this.sender = sender;
 		this.dns = dns;
 		this.psl = psl;
@@ -165,6 +182,20 @@ public final class DmarcReporter {
 			timer.shutdownNow();
 			timer = null;
 		}
+		LockDomain d = domain;
+		domain = null;
+		if (d != null) {
+			MailLocks.release(d);
+		}
+	}
+
+	private static boolean shared(LockDomain d) {
+		return d != null && d.sharing() != Sharing.OFF;
+	}
+
+	/** A lock of the report directory, the same name on every server sharing it. */
+	private String lockName(LockDomain d, String what) throws IOException {
+		return MailboxRegistry.lockName("dmarc", d, dir) + "/" + what;
 	}
 
 	public synchronized boolean isRunning() {
@@ -273,12 +304,29 @@ public final class DmarcReporter {
 		return ret;
 	}
 
+	/**
+	 * Add an evaluation to its domain's log. In a shared directory each server appends to logs
+	 * of its own (so writers never share a file), holding the directory's "logs" lock shared:
+	 * a flush takes it exclusive while it takes the logs away.
+	 */
 	private void store(ReportRecord r) {
 		synchronized (fileLock) {
-			try (OutputStream out = file(r.getPolicyDomain(), ".log").getOutputStream(true)) {
-				out.write(r.toLine().getBytes(StandardCharsets.UTF_8));
+			LockDomain d = domain;
+			NamedLock l = null;
+			try {
+				if (d != null) {
+					l = d.request(lockName(d, "logs")).shared().acquire();
+				}
+				String ext = shared(d) ? "." + tag + ".log" : ".log";
+				try (OutputStream out = file(r.getPolicyDomain(), ext).getOutputStream(true)) {
+					out.write(r.toLine().getBytes(StandardCharsets.UTF_8));
+				}
 			} catch (IOException e) {
 				// best effort
+			} finally {
+				if (l != null) {
+					l.close();
+				}
 			}
 		}
 	}
@@ -291,7 +339,7 @@ public final class DmarcReporter {
 
 	private void flushQuietly() {
 		try {
-			flush();
+			flush(true);
 		} catch (IOException | RuntimeException e) {
 			// try again next time
 		}
@@ -304,38 +352,128 @@ public final class DmarcReporter {
 	 * @return the number of report messages queued
 	 */
 	public int flush() throws IOException {
+		return flush(false);
+	}
+
+	/**
+	 * What the timer does: {@link #flush()}, unless the report directory is shared and a server
+	 * sent the reports less than an interval ago.
+	 *
+	 * @return the number of report messages queued
+	 */
+	public int flushIfDue() throws IOException {
+		return flush(true);
+	}
+
+	/**
+	 * Send the reports. With a lock domain only one server sends at a time (holding the
+	 * directory's "send" lock; a server that finds it taken leaves the work to the holder), and
+	 * in a shared directory the timer's flush is skipped if another server sent less than an
+	 * interval ago, so the servers together send about once an interval.
+	 */
+	private int flush(boolean scheduled) throws IOException {
 		if (dir == null) {
 			return 0;
 		}
+		LockDomain d = domain;
+		NamedLock send = null;
+		if (d != null) {
+			send = d.request(lockName(d, "send")).exclusive().reentrant(false).tryAcquire();
+			if (send == null) {
+				return 0;
+			}
+		}
+		try {
+			if (scheduled && shared(d) && !due()) {
+				return 0;
+			}
+			int sent = flush(d, send);
+			if (shared(d)) {
+				send.checkValid();
+				try (OutputStream out = dir.getChild(LAST_SENT).getOutputStream()) {
+					out.write(Long.toString(clock.getAsLong()).getBytes(StandardCharsets.UTF_8));
+				}
+			}
+			return sent;
+		} finally {
+			if (send != null) {
+				send.close();
+			}
+		}
+	}
+
+	/** True if no server sent reports in (most of) the last interval. */
+	private boolean due() {
+		try (BufferedReader r = new BufferedReader(new InputStreamReader(dir.getChild(LAST_SENT).getInputStream(), StandardCharsets.UTF_8))) {
+			String line = r.readLine();
+			long last = line == null ? 0 : Long.parseLong(line.trim());
+			return clock.getAsLong() - last >= intervalMillis - intervalMillis / 10;
+		} catch (IOException | NumberFormatException e) {
+			return true; // never sent, or unreadable
+		}
+	}
+
+	private int flush(LockDomain d, NamedLock send) throws IOException {
 		List<FileSource> batches = new ArrayList<>();
 		synchronized (fileLock) {
-			for (FileSource f : dir.listFiles()) {
-				String n = f.getName();
-				if (n.endsWith(".log")) {
-					FileSource s = dir.getChild(n.substring(0, n.length() - 4) + "." + Long.toString(clock.getAsLong(), 36) + ".sending");
-					if (f.renameTo(s)) {
-						batches.add(s);
+			NamedLock logs = d == null ? null : d.request(lockName(d, "logs")).exclusive().acquire();
+			try {
+				for (FileSource f : dir.listFiles()) {
+					String n = f.getName();
+					if (n.endsWith(".log")) {
+						FileSource s = dir.getChild(n.substring(0, n.length() - 4) + "." + Long.toString(clock.getAsLong(), 36) + ".sending");
+						if (f.renameTo(s)) {
+							batches.add(s);
+						}
+					} else if (n.endsWith(".sending")) {
+						batches.add(f); // left over from an earlier run
 					}
-				} else if (n.endsWith(".sending")) {
-					batches.add(f); // left over from an earlier run
+				}
+			} finally {
+				if (logs != null) {
+					logs.close();
 				}
 			}
 		}
-		int sent = 0;
+		// one report per policy domain, whichever servers' logs its evaluations are in
+		Map<String, List<ReportRecord>> byDomain = new LinkedHashMap<>();
+		Map<String, List<FileSource>> filesByDomain = new LinkedHashMap<>();
+		List<FileSource> empty = new ArrayList<>();
 		for (FileSource f : batches) {
-			List<ReportRecord> records = new ArrayList<>();
+			String first = null;
 			try (BufferedReader r = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.UTF_8))) {
 				String line;
 				while ((line = r.readLine()) != null) {
 					ReportRecord rec = ReportRecord.fromLine(line);
 					if (rec != null) {
-						records.add(rec);
+						String pd = rec.getPolicyDomain().toLowerCase(Locale.ROOT);
+						byDomain.computeIfAbsent(pd, k -> new ArrayList<>()).add(rec);
+						if (first == null) {
+							first = pd;
+						}
 					}
 				}
 			}
-			if (!records.isEmpty()) {
-				sent += sendAggregate(records);
+			if (first == null) {
+				empty.add(f);
+			} else {
+				filesByDomain.computeIfAbsent(first, k -> new ArrayList<>()).add(f);
 			}
+		}
+		int sent = 0;
+		for (Map.Entry<String, List<ReportRecord>> e : byDomain.entrySet()) {
+			if (send != null) {
+				send.checkValid(); // lost it: the server that took it sends these
+			}
+			sent += sendAggregate(e.getValue());
+			List<FileSource> done = filesByDomain.get(e.getKey());
+			if (done != null) {
+				for (FileSource f : done) {
+					f.delete();
+				}
+			}
+		}
+		for (FileSource f : empty) {
 			f.delete();
 		}
 		return sent;

@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.net.lock.NamedLock;
 import us.bringardner.parley.smtp.MailAddress;
 
 /**
@@ -19,6 +20,7 @@ import us.bringardner.parley.smtp.MailAddress;
 public final class QueueEntry {
 
 	static final String HEADER = "BJLQUEUE 1";
+	private static final java.util.Random TMP_RANDOM = new java.security.SecureRandom();
 
 	/** BODY parameter values (RFC 6152, RFC 3030). */
 	public enum Body {
@@ -186,7 +188,19 @@ public final class QueueEntry {
 	}
 
 	void write(FileSource file) throws IOException {
-		FileSource tmp = file.getParentFile().getChild("." + file.getName() + ".tmp");
+		write(file, null);
+	}
+
+	/**
+	 * Save the envelope: written to a temporary file of its own (servers sharing the queue
+	 * never write the same one), then put in place, replacing the old one atomically where
+	 * the store can.
+	 * @param lock the entry's lock, checked just before the file is replaced (so a server
+	 *             that lost it never overwrites the work of the one that took it), or null
+	 */
+	void write(FileSource file, NamedLock lock) throws IOException {
+		FileSource tmp = file.getParentFile().getChild("." + file.getName() + "."
+				+ Long.toString(System.nanoTime() & 0xffffffffL, 36) + Integer.toString(TMP_RANDOM.nextInt(1 << 30), 36) + ".tmp");
 		try (Writer w = new OutputStreamWriter(tmp.getOutputStream(), StandardCharsets.UTF_8)) {
 			w.write(HEADER + "\n");
 			w.write("ID\t" + id + "\n");
@@ -214,11 +228,19 @@ public final class QueueEntry {
 						+ "\n");
 			}
 		}
-		if (file.exists()) {
-			file.delete();
-		}
-		if (!tmp.renameTo(file)) {
-			throw new IOException("Can't write " + file.getAbsolutePath());
+		boolean done = false;
+		try {
+			if (lock != null) {
+				lock.checkValid();
+			}
+			done = tmp.renameTo(file, true);
+			if (!done) {
+				throw new IOException("Can't write " + file.getAbsolutePath());
+			}
+		} finally {
+			if (!done) {
+				tmp.delete();
+			}
 		}
 	}
 

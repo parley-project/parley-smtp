@@ -1,5 +1,24 @@
 # Changelog
 
+## parley-smtp 1.1.0 (unreleased)
+
+### Added
+
+- **Several servers on one queue** (parley-mail 1.1.0's `parley.mail.sharedStore`): each delivery pass holds the
+  message's lock (`queue/<dir>/<id>`, through parley-net's locks), skips a message another server holds, and
+  starts from the envelope on disk; a shared queue picks up the other servers' messages every few seconds
+  (`MailQueue.setSyncInterval`, `isShared()`) and removes only temporary files over an hour old.
+- DMARC reports in a shared directory: logs per server, one server sending at a time, one report per domain with
+  every server's evaluations, and `.last-sent` for one timed sending per interval (`DmarcReporter.flushIfDue()`).
+
+### Changed (no code change needed)
+
+- The queue starts after the server has claimed the store (`AbstractMailServer.storeClaimed()`) and stops before
+  the claim is given up (`releasingStore()`).
+- An envelope is written to a temporary file of its own and replaces the old one in one step where the store can.
+- A flush sends one aggregate report per policy domain, whatever log files its evaluations are in.
+- Dependencies: parley-mail, parley-net and parley-pop3 (tests) 1.1.0.
+
 ## parley-smtp 1.0.0 (2026-10-16)
 
 The SMTP server, queue, DKIM, SPF, DMARC and ARC code of BjlEmail (`us.bringardner:bjl_email`
