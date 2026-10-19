@@ -144,7 +144,7 @@ public class TestSmtpServer {
 		deleteAll(rootB);
 	}
 
-	private static void deleteAll(FileSource f) throws IOException {
+	static void deleteAll(FileSource f) throws IOException {
 		if (f == null) {
 			return;
 		}

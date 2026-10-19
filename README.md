@@ -110,6 +110,12 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 - **Retries:** temporary failures are retried on `JSmtp.queue.retry` (minutes, default `1,5,15,30,60,120`).
   - The sender gets a "delayed" notice after `JSmtp.queue.delayWarningHours` (default 4).
   - The message is returned after `JSmtp.queue.maxAgeHours` (default 120).
+- **Several servers on one queue:** set `parley.mail.sharedStore` (`off`, the default, `host` or `cluster`; see parley-mail) when servers share the maildrop root, and with it `.smtp-queue`.
+  - Each delivery pass holds the message's lock in the store's lock domain (`queue/.smtp-queue/<id>`). A message another server is working on is skipped, not waited for.
+  - A pass starts from the envelope as it is on disk, so no server repeats a delivery another made or overwrites its progress. A message another server finished is dropped.
+  - A shared queue looks at the directory every few seconds for messages the other servers accepted.
+  - Leftover temporary files are removed at start when the queue isn't shared; shared, only those over an hour old, which no running server can still be writing.
+  - The queue starts once the server has claimed the store and stops before it gives the claim up, so a server refused the store never delivers from it.
 - **Notifications** are RFC 3464 multipart/report messages from `MAILER-DAEMON`.
   - They honour NOTIFY, RET, ENVID and ORCPT.
   - For UTF-8 addresses or messages they use `message/global-delivery-status` and `message/global`.
@@ -196,6 +202,7 @@ Domains ask for reports with `rua=` (aggregate) and `ruf=` (failure) in their DM
   - Sent when the domain's `fo=` options call for one: `0` (default) when nothing passed aligned, `1` when either SPF or DKIM didn't pass aligned, `d` when a DKIM signature failed, `s` when SPF failed.
   - At most `JSmtp.dmarc.maxFailureReportsPerHour` (default 10) per domain. Never sent about a message that is itself a report.
 - **Report addresses:** only `mailto:` URIs are supported, and their size limits (`!10m`) are honoured. An address outside the policy domain's organization is used only if its domain agrees to take the reports (a `v=DMARC1` TXT record at `<policy domain>._report._dmarc.<report domain>`, section 7.1).
+- **Several servers:** with `parley.mail.sharedStore` on, each server stores its evaluations in logs of its own, under the store's "logs" lock (held shared while storing, exclusive while a flush takes the logs). One server sends at a time (the "send" lock; a server that finds it taken leaves the work to the holder), and each domain still gets one report with every server's evaluations. `.last-sent` keeps the servers' timers to about one sending per interval between them. The failure-report rate limit is counted per server.
 - **Sending:** reports go out through the queue from `JSmtp.dmarc.reportEmail` (default `postmaster@<hostname>`). They are DKIM-signed if a key fits that domain. `JSmtp.dmarc.reportOrgName` (default the host name) names the reporter.
 
 ### ARC (RFC 8617)
@@ -271,6 +278,8 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 `TestDmarc` runs the publicsuffix.org test file against the included Public Suffix List. It also covers record parsing, strict and relaxed alignment, `sp=`, `pct=` sampling, DNS errors and bad From fields. `TestDmarcSmtp` covers an aligned pass through a signing relay, a forged From (recorded, or refused when enforcing), quarantine to Junk, and an aligned SPF pass.
 
 `TestDmarcReports` covers aggregate reports, validated against the RFC 7489 schema (`src/test/resources/dmarc/rfc7489.xsd`, repaired as its header explains). It also covers row counts, restarts, report-address permission and size limits, the ARF failure report, `fo=` options, rate limits, and not reporting on reports. `TestDmarcSmtp` also follows both kinds of report through the queue to a mailbox.
+
+`TestSharedQueue` puts two queues on one directory with `parley.mail.sharedStore=cluster` and a second lock service as another server. It covers each message delivered once, an entry another server holds left alone until it lets go, stale entries dropped or reloaded from the envelope on disk, and which temporary files are removed. `TestSharedDmarcReports` covers two reporters on one directory: one report with both servers' evaluations, a flush that leaves the work to the server sending, and one timed sending per interval.
 
 `TestArcSuite` runs the ValiMail ARC test suite (`src/test/resources/arc/`, MIT licence, from github.com/ValiMail/arc_test_suite). All 171 validation cases pass. One case, `ams_fields_c_na`, is checked as `fail` rather than the suite's `pass`: RFC 8617 makes `c=` default to `simple/simple`, as in DKIM, and the suite assumes `relaxed`. In the signing cases, every ARC-Authentication-Results and ARC-Message-Signature field matches exactly. The ARC-Seal `b=` values the suite expects are out of date: its own later messages carry the seals for the same input, and ours match those byte for byte. Every set we make is also validated. `TestArcSmtp` forwards mail through an alias on one server to another. It covers the added set, `arc=pass`, a DMARC failure overridden for a trusted sealer (with its aggregate report row), and a rejection when the sealer isn't trusted.
 

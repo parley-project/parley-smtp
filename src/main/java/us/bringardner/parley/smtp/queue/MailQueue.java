@@ -1,6 +1,7 @@
 package us.bringardner.parley.smtp.queue;
 
 import us.bringardner.parley.io.IoUtils;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -9,6 +10,7 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +24,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.mail.store.MailLocks;
+import us.bringardner.parley.mail.store.MailboxRegistry;
+import us.bringardner.parley.net.lock.LockDomain;
+import us.bringardner.parley.net.lock.NamedLock;
+import us.bringardner.parley.net.lock.Sharing;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SmtpStreams;
 import us.bringardner.parley.smtp.dkim.Arc;
@@ -38,6 +45,15 @@ import us.bringardner.parley.core.NamedThreadFactory;
  * deliver it: into local users' INBOXes, or to the MX hosts of other domains,
  * retrying temporary failures on a schedule, and returning delivery status
  * notifications (RFC 3464) to the sender when asked or when delivery fails.
+ * <p>
+ * Servers may share the queue directory (see {@code parley.mail.sharedStore} in
+ * {@link MailLocks}): when the directory is under a maildrop root with a lock domain, each
+ * delivery pass holds the entry's lock {@code queue/<dir>/<id>} (an entry another server is
+ * working on is skipped, not waited for) and starts from the envelope on disk, so a message is
+ * delivered by one server at a time and no server overwrites another's progress. A shared queue
+ * looks at the directory every few seconds for messages other servers accepted, and only
+ * removes leftover temporary files when they are old enough that no server can still be
+ * writing them.
  */
 public class MailQueue {
 
@@ -46,6 +62,8 @@ public class MailQueue {
 	private static final AtomicLong SEQUENCE = new AtomicLong();
 	/** Alias expansion deeper than this is a loop. */
 	private static final int MAX_ALIAS_DEPTH = 10;
+	/** A shared queue's temporary file this old was left by a server that stopped. */
+	static final long STALE_MILLIS = 60 * 60 * 1000L;
 
 	private final FileSource dir;
 	private final DeliveryConfig config;
@@ -58,6 +76,14 @@ public class MailQueue {
 	private Thread scheduler;
 	private ExecutorService workers;
 	private int users;
+	/** The lock domain of the queue directory while running, or null (no locks). */
+	private volatile LockDomain domain;
+	/** Entries {@link #flush()} asked for, kept until their next pass reloads them. */
+	private final Set<String> flushRequested = ConcurrentHashMap.newKeySet();
+	/** Damaged envelopes, reported once. */
+	private final Set<String> damaged = ConcurrentHashMap.newKeySet();
+	private volatile long syncMillis = 5000;
+	private long lastSync;
 
 	public MailQueue(FileSource dir, DeliveryConfig config) {
 		this.dir = dir;
@@ -85,29 +111,24 @@ public class MailQueue {
 		if (users++ > 0) {
 			return;
 		}
-		if (!dir.exists() && !dir.mkdirs()) {
-			throw new IOException("Can't create the queue directory " + dir.getAbsolutePath());
-		}
-		FileSource[] list = dir.listFiles();
-		if (list != null) {
-			for (FileSource f : list) {
-				String name = f.getName();
-				if (name.startsWith(".")) {
-					f.delete(); // an incomplete message or index from before a crash
-				} else if (name.endsWith(".env")) {
-					try {
-						QueueEntry e = QueueEntry.read(f);
-						if (content(e.id).exists()) {
-							entries.put(e.id, e);
-						} else {
-							f.delete();
-						}
-					} catch (IOException e) {
-						LOG.log(Level.WARNING, "Skipping damaged queue file " + name, e);
-					}
-				}
+		boolean ok = false;
+		try {
+			if (!dir.exists() && !dir.mkdirs()) {
+				throw new IOException("Can't create the queue directory " + dir.getAbsolutePath());
+			}
+			LockDomain d = MailboxRegistry.get().domainOf(dir);
+			if (d != null) {
+				domain = MailLocks.acquire(d.root()); // our own reference, released by stop()
+			}
+			syncWithDirectory(true);
+			ok = true;
+		} finally {
+			if (!ok) {
+				users--;
+				releaseDomain();
 			}
 		}
+		lastSync = System.currentTimeMillis();
 		running = true;
 		workers = Executors.newFixedThreadPool(config.getWorkers(), new NamedThreadFactory("SmtpQueueWorker"));
 		scheduler = new Thread(this::schedule, "SmtpQueue");
@@ -129,6 +150,87 @@ public class MailQueue {
 				Thread.currentThread().interrupt();
 			}
 		}
+		releaseDomain();
+	}
+
+	private void releaseDomain() {
+		LockDomain d = domain;
+		domain = null;
+		if (d != null) {
+			MailLocks.release(d);
+		}
+	}
+
+	/** True if other servers may use this queue's directory (a lock domain that isn't OFF). */
+	public boolean isShared() {
+		LockDomain d = domain;
+		return d != null && d.sharing() != Sharing.OFF;
+	}
+
+	/** How often a shared queue looks at the directory for other servers' messages. */
+	public void setSyncInterval(long millis) {
+		this.syncMillis = Math.max(1, millis);
+	}
+
+	/**
+	 * Bring the entries in line with the directory: load envelopes this queue doesn't know yet
+	 * (other servers' messages, or all of them at start), drop entries whose envelope is gone
+	 * (delivered by another server) and remove leftover temporary files. Files are only
+	 * removed when no other server can be using them: unshared, everything left over from
+	 * before a crash goes at start; shared, only temporary files older than an hour.
+	 */
+	void syncWithDirectory(boolean starting) throws IOException {
+		FileSource[] list = dir.listFiles();
+		if (list == null) {
+			return;
+		}
+		boolean shared = isShared();
+		long now = System.currentTimeMillis();
+		Set<String> onDisk = new HashSet<>();
+		for (FileSource f : list) {
+			String name = f.getName();
+			if (name.startsWith(".")) {
+				if (shared ? isStale(f, now) : starting) {
+					f.delete(); // an incomplete message or envelope from before a crash
+				}
+			} else if (name.endsWith(".env")) {
+				String id = name.substring(0, name.length() - 4);
+				onDisk.add(id);
+				if (entries.containsKey(id)) {
+					continue;
+				}
+				try {
+					QueueEntry e = QueueEntry.read(f);
+					if (content(e.id).exists()) {
+						entries.putIfAbsent(e.id, e);
+						damaged.remove(name);
+					} else if (!shared) {
+						f.delete();
+					}
+				} catch (FileNotFoundException | java.nio.file.NoSuchFileException gone) {
+					// delivered and removed by another server since the listing
+				} catch (IOException e) {
+					if (damaged.add(name)) {
+						LOG.log(Level.WARNING, "Skipping damaged queue file " + name, e);
+					}
+				}
+			}
+		}
+		if (!starting) {
+			for (String id : new ArrayList<>(entries.keySet())) {
+				if (!onDisk.contains(id) && !active.contains(id) && !envelope(id).exists()) {
+					entries.remove(id);
+				}
+			}
+		}
+	}
+
+	private static boolean isStale(FileSource f, long now) {
+		try {
+			return now - f.lastModified() > STALE_MILLIS;
+		} catch (IOException e) {
+			return false;
+		}
 	}
 
 	public boolean isRunning() {
@@ -144,6 +246,9 @@ public class MailQueue {
 
 	/** Try every pending message now, ignoring the retry schedule. */
 	public void flush() {
+		if (domain != null) {
+			flushRequested.addAll(entries.keySet()); // each pass starts from the envelope on disk
+		}
 		for (QueueEntry e : entries.values()) {
 			synchronized (e) {
 				for (QueuedRecipient r : e.recipients) {
@@ -162,6 +267,14 @@ public class MailQueue {
 	private void schedule() {
 		while (running) {
 			long now = System.currentTimeMillis();
+			if (isShared() && now - lastSync >= syncMillis) {
+				lastSync = now;
+				try {
+					syncWithDirectory(false);
+				} catch (IOException | RuntimeException ex) {
+					LOG.log(Level.DEBUG, "Can't look at the queue directory", ex);
+				}
+			}
 			for (QueueEntry e : entries.values()) {
 				if (e.nextAttempt() <= now && active.add(e.id)) {
 					try {
@@ -281,7 +394,7 @@ public class MailQueue {
 	 * Authentication-Results field. Done once per message; a failure is logged
 	 * and the message goes unsealed.
 	 */
-	void arcSeal(QueueEntry e, FileSource content) {
+	void arcSeal(QueueEntry e, FileSource content, NamedLock entryLock) {
 		Arc arc = config.getArc();
 		ArcSealer sealer = arc.sealer(config.getDkim(), config.getHostname());
 		if (sealer == null) {
@@ -298,7 +411,7 @@ public class MailQueue {
 					e.size = content.length();
 				}
 				e.arcSealed = true;
-				e.write(envelope(e.id));
+				e.write(envelope(e.id), entryLock);
 			}
 		} catch (IOException | GeneralSecurityException | RuntimeException ex) {
 			LOG.log(Level.WARNING, "Can't ARC-seal " + e.id + "; it is forwarded unsealed", ex);
@@ -341,8 +454,74 @@ public class MailQueue {
 
 	// ------------------------------------------------------------------ delivery
 
-	/** One delivery pass over an entry's due recipients. */
+	/** The lock name of an entry: the same on every server sharing the queue. */
+	private String lockName(LockDomain d, String id) throws IOException {
+		return MailboxRegistry.lockName("queue", d, dir) + "/" + id;
+	}
+
+	/**
+	 * One delivery pass over an entry's due recipients. With a lock domain, under the entry's
+	 * lock (skipped if another server holds it) and from the envelope as it is on disk.
+	 */
 	void process(QueueEntry e) throws IOException {
+		LockDomain d = domain;
+		if (d == null) {
+			process(e, null);
+			return;
+		}
+		NamedLock l = d.request(lockName(d, e.id)).exclusive().reentrant(false).tryAcquire();
+		if (l == null) {
+			return; // another server is delivering it; we'll see its progress next time
+		}
+		try {
+			QueueEntry cur = reload(e);
+			if (cur == null) {
+				return;
+			}
+			if (flushRequested.remove(cur.id)) {
+				synchronized (cur) {
+					for (QueuedRecipient r : cur.recipients) {
+						if (r.status == QueuedRecipient.Status.PENDING) {
+							r.nextAttempt = 0;
+						}
+					}
+				}
+			}
+			if (cur.nextAttempt() > System.currentTimeMillis()) {
+				return; // another server tried it since we looked
+			}
+			process(cur, l);
+		} finally {
+			l.close();
+		}
+	}
+
+	/**
+	 * The entry as saved (another server may have worked on it), now in the entries; null if it
+	 * is gone (delivered, or half removed, which is finished here).
+	 */
+	private QueueEntry reload(QueueEntry e) throws IOException {
+		FileSource env = envelope(e.id);
+		QueueEntry cur;
+		try {
+			cur = QueueEntry.read(env);
+		} catch (IOException ex) {
+			if (env.exists()) {
+				throw ex;
+			}
+			entries.remove(e.id);
+			return null;
+		}
+		if (!content(e.id).exists()) {
+			env.delete();
+			entries.remove(e.id);
+			return null;
+		}
+		entries.put(cur.id, cur);
+		return cur;
+	}
+
+	private void process(QueueEntry e, NamedLock entryLock) throws IOException {
 		FileSource content = content(e.id);
 		long now = System.currentTimeMillis();
 		List<QueuedRecipient> failed = new ArrayList<>();
@@ -368,7 +547,7 @@ public class MailQueue {
 			}
 		}
 		if (!remoteByDomain.isEmpty() && e.inbound && !e.arcSealed) {
-			arcSeal(e, content);
+			arcSeal(e, content, entryLock);
 		}
 		for (Map.Entry<String, List<QueuedRecipient>> group : remoteByDomain.entrySet()) {
 			Map<QueuedRecipient, RemoteDelivery.Result> results = remote.deliver(e, content, group.getValue(), group.getKey());
@@ -423,8 +602,11 @@ public class MailQueue {
 				LOG.log(Level.WARNING, "A bounce couldn't be delivered and is discarded: " + e);
 			}
 			if (e.isPending()) {
-				e.write(envelope(e.id));
+				e.write(envelope(e.id), entryLock);
 			} else {
+				if (entryLock != null) {
+					entryLock.checkValid();
+				}
 				entries.remove(e.id);
 				envelope(e.id).delete();
 				content.delete();
