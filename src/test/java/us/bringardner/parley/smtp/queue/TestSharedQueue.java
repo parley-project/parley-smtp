@@ -191,6 +191,52 @@ public class TestSharedQueue {
 		fresh.delete();
 	}
 
+	/**
+	 * stop() returns while a slow delivery is still under way, but the entry's lock stays held
+	 * until the delivery ends, so another server can't take the entry over meanwhile.
+	 */
+	@Test
+	public void aDeliveryStillUnderWayAtStopKeepsItsLock() throws Exception {
+		java.util.concurrent.CountDownLatch delivering = new java.util.concurrent.CountDownLatch(1);
+		java.util.concurrent.CountDownLatch finish = new java.util.concurrent.CountDownLatch(1);
+		q1.getConfig().setResolver((d, p) -> {
+			delivering.countDown();
+			try {
+				finish.await(20, java.util.concurrent.TimeUnit.SECONDS);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+			throw DeliveryException.temporary("4.4.1", "slow");
+		});
+		q1.stopWaitMillis = 100;
+		q1.start();
+		MailLocks.release(domain); // the queue's reference is the only one: as when its server stops
+		QueueEntry e = q1.enqueue(MailAddress.parse("x@s.test", true), List.of(MailAddress.parse("someone@far.test", true)),
+				new ByteArrayInputStream("Subject: slow\r\n\r\nx\r\n".getBytes(StandardCharsets.UTF_8)), false);
+		assertTrue(delivering.await(10, java.util.concurrent.TimeUnit.SECONDS), "the delivery started");
+		q1.stop();
+		String name = MailboxRegistry.lockName("queue", otherDomain, dir) + "/" + e.getId();
+		try {
+			Thread.sleep(300);
+			assertTrue(otherDomain.tryLock(name, Mode.EXCLUSIVE) == null, "still held while it delivers");
+		} finally {
+			domain = MailLocks.acquire(root);
+		}
+		finish.countDown();
+		waitFor(() -> {
+			try {
+				NamedLock l = otherDomain.tryLock(name, Mode.EXCLUSIVE);
+				if (l != null) {
+					l.close();
+					return true;
+				}
+				return false;
+			} catch (IOException x) {
+				return false;
+			}
+		}, 10000, "the lock once the delivery ended");
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	/** An entry written as another server would: content, then envelope. */
