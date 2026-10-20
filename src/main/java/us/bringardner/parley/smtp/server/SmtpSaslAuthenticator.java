@@ -3,6 +3,7 @@ package us.bringardner.parley.smtp.server;
 import us.bringardner.parley.net.sasl.ISaslAuthenticator;
 import us.bringardner.parley.net.sasl.ScramCredentials;
 import us.bringardner.parley.net.sasl.ScramMechanism;
+import us.bringardner.parley.net.server.AccessControlUnavailableException;
 
 /**
  * Checks SASL passwords the way the session does everywhere else: through
@@ -17,6 +18,7 @@ import us.bringardner.parley.net.sasl.ScramMechanism;
 public class SmtpSaslAuthenticator implements ISaslAuthenticator {
 
 	private final SmtpRequestProcessor processor;
+	private boolean unavailable;
 
 	public SmtpSaslAuthenticator(SmtpRequestProcessor processor) {
 		this.processor = processor;
@@ -24,7 +26,9 @@ public class SmtpSaslAuthenticator implements ISaslAuthenticator {
 
 	@Override
 	public boolean checkPassword(String user, String password) {
-		return processor.login(user, password);
+		boolean ok = processor.login(user, password);
+		unavailable |= processor.isLoginUnavailable();
+		return ok;
 	}
 
 	@Override
@@ -39,6 +43,16 @@ public class SmtpSaslAuthenticator implements ISaslAuthenticator {
 	/** SCRAM credentials from the server's access control list (the name prepared with SASLprep). */
 	@Override
 	public ScramCredentials getScramCredentials(String user, String hash) {
-		return processor.getScramCredentials(user, hash);
+		try {
+			return processor.getScramCredentials(user, hash);
+		} catch (AccessControlUnavailableException e) {
+			unavailable = true;
+			return null;
+		}
+	}
+
+	/** @return true if the access control list couldn't answer, so the login failed for that reason */
+	public boolean isUnavailable() {
+		return unavailable;
 	}
 }

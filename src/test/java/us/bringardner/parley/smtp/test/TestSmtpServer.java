@@ -502,6 +502,73 @@ public class TestSmtpServer {
 		}
 	}
 
+	/** An access control list whose database is down: every lookup throws. */
+	static IAccessControlList downAcl() {
+		return new IAccessControlList() {
+				@Override
+				public void initialize(us.bringardner.parley.net.server.IServer s) {
+				}
+
+				@Override
+				public boolean checkPermission(us.bringardner.parley.net.server.IPrincipal user, us.bringardner.parley.net.server.IPermission action) {
+					return false;
+				}
+
+				@Override
+				public us.bringardner.parley.net.server.IPrincipal getPrincipal(String user) {
+					return null;
+				}
+
+				@Override
+				public us.bringardner.parley.net.server.IPrincipal findPrincipal(String user) throws us.bringardner.parley.net.server.AccessControlUnavailableException {
+					throw new us.bringardner.parley.net.server.AccessControlUnavailableException("the database is down");
+				}
+
+				@Override
+				public boolean supportsScram(String hash) {
+					return true;
+				}
+
+				@Override
+				public us.bringardner.parley.net.sasl.ScramCredentials getScramCredentials(String user, String hash)
+						throws us.bringardner.parley.net.server.AccessControlUnavailableException {
+					throw new us.bringardner.parley.net.server.AccessControlUnavailableException("the database is down");
+				}
+			};
+	}
+
+	@Test
+	public void testAccessControlUnavailable() throws Exception {
+		IAccessControlList old = submission.getAccessControl();
+		submission.setAccessControl(downAcl());
+		us.bringardner.parley.core.ILogger.Level level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(Level.NONE);
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.cmd("EHLO client.example");
+			for (int i = 0; i < 6; i++) {
+				String reply = c.cmd("AUTH PLAIN " + plain("tony", "secret"));
+				assertTrue(reply.startsWith("454 4.7.0"), reply);
+			}
+			String reply = scram(c, ScramMechanism.SHA_256, "tony", "secret");
+			assertTrue(reply.startsWith("454 4.7.0"), reply);
+		} finally {
+			submission.setAccessControl(old);
+			submission.getLogger().setLevel(level);
+		}
+		// a local recipient that can't be looked up is tried again later, not refused as unknown
+		IAccessControlList delivery = a.getQueue().getConfig().getAccessControl();
+		a.getQueue().getConfig().setAccessControl(downAcl());
+		try (Client c = new Client(a.getLocalPort())) {
+			c.cmd("EHLO client.example");
+			c.ok("MAIL FROM:<x@elsewhere.test>", "250");
+			String reply = c.cmd("RCPT TO:<tony@a.test>");
+			assertTrue(reply.startsWith("451 4.3.0"), reply);
+			assertTrue(c.cmd("RCPT TO:<sales@a.test>").startsWith("250"), "an alias needs no lookup");
+		} finally {
+			a.getQueue().getConfig().setAccessControl(delivery);
+		}
+	}
+
 	@Test
 	public void testSubmission() throws Exception {
 		reset(rootB, "team");

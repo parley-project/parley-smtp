@@ -82,9 +82,10 @@ public final class LocalDelivery {
 		if (acl == null) {
 			return null;
 		}
-		IPrincipal p = acl.getPrincipal(localPart);
+		// a list that can't answer throws (an IOException): the recipient is tried again later, not refused
+		IPrincipal p = acl.findPrincipal(localPart);
 		if (p == null && !lower.equals(localPart)) {
-			p = acl.getPrincipal(lower);
+			p = acl.findPrincipal(lower);
 		}
 		if (p == null) {
 			return null;
