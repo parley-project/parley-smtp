@@ -72,7 +72,7 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 | CHUNKING and BINARYMIME (BDAT) | 3030 |
 | DSN | 3461, 3464, 6533 |
 | STARTTLS | 3207 |
-| AUTH PLAIN and LOGIN | 4954, 4616 |
+| AUTH PLAIN and LOGIN; SCRAM-SHA-256 and SCRAM-SHA-1 when every user has SCRAM credentials | 4954, 4616, 5802, 7677 |
 | Message submission | 6409 |
 | Implicit TLS (port 465) | 8314 |
 | Null MX | 7505 |
@@ -264,7 +264,7 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 `TestSmtpServer` runs two servers on real sockets. Server A (`a.test`) relays to server B (`b.test`) through a test MX resolver. The tests cover:
 
 - local delivery, aliases, `postmaster` and relay refusal;
-- submission with STARTTLS, AUTH PLAIN and AUTH LOGIN;
+- submission with STARTTLS, AUTH PLAIN, AUTH LOGIN and AUTH SCRAM;
 - bounces with DSN parameters, delay and expiry notices;
 - PIPELINING, BDAT and BINARYMIME, smuggling and loop protection;
 - SMTPUTF8;

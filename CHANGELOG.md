@@ -4,6 +4,9 @@
 
 ### Added
 
+- **SCRAM-SHA-256 and SCRAM-SHA-1** for `AUTH`, offered in EHLO when the server's access control list keeps SCRAM
+  credentials for every user (parley-net 1.1.0: `FileBasedAcl --scram`, or parley-net-acl-jdbc). The user is
+  logged in with `SmtpRequestProcessor.loginVerified(user)` after the proof, with the same permission checks as a password login.
 - **Several servers on one queue** (parley-mail 1.1.0's `parley.mail.sharedStore`): each delivery pass holds the
   message's lock (`queue/<dir>/<id>`, through parley-net's locks), skips a message another server holds, and
   starts from the envelope on disk; a shared queue picks up the other servers' messages every few seconds
