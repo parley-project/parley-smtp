@@ -33,7 +33,11 @@ import org.junit.jupiter.api.Test;
 import us.bringardner.parley.core.ILogger.Level;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
+import us.bringardner.parley.net.sasl.ISaslClient;
+import us.bringardner.parley.net.sasl.SaslException;
+import us.bringardner.parley.net.sasl.ScramMechanism;
 import us.bringardner.parley.net.server.FileBasedAcl;
+import us.bringardner.parley.net.server.IAccessControlList;
 import us.bringardner.parley.net.server.IServer;
 import us.bringardner.parley.mail.store.MailStore;
 import us.bringardner.parley.mail.store.Mailbox;
@@ -435,6 +439,66 @@ public class TestSmtpServer {
 			c.ok("RSET", "250");
 		} finally {
 			trusted.stop();
+		}
+	}
+
+	/** AUTH with SCRAM; returns the final reply. */
+	private static String scram(Client c, ScramMechanism m, String user, String password) throws IOException {
+		ISaslClient client = m.client(user, password);
+		Base64.Encoder enc = Base64.getEncoder();
+		String line = c.cmd("AUTH " + m.getName() + " " + enc.encodeToString(client.initialResponse()));
+		while (line.startsWith("334 ")) {
+			try {
+				line = c.cmd(enc.encodeToString(client.evaluateChallenge(Base64.getDecoder().decode(line.substring(4).trim()))));
+			} catch (SaslException e) {
+				return c.cmd("*");
+			}
+		}
+		return line;
+	}
+
+	@Test
+	public void testAuthScram() throws Exception {
+		try (Client c = new Client(submission.getLocalPort())) {
+			// the test users include a hashed password without SCRAM credentials: SCRAM isn't offered
+			String ehlo = c.cmd("EHLO client.example");
+			assertTrue(ehlo.contains("AUTH PLAIN LOGIN"), ehlo);
+			assertFalse(ehlo.contains("SCRAM"), ehlo);
+			assertTrue(c.cmd("AUTH SCRAM-SHA-256").startsWith("504"));
+		}
+		final String carol = FileBasedAcl.hashPasswordWithScram("carolpw".toCharArray());
+		final String reader = FileBasedAcl.hashPasswordWithScram("pw".toCharArray());
+		IAccessControlList acl = new FileBasedAcl() {
+			{
+				parseLine("carol, " + carol + ", READ|WRITE");
+				parseLine("reader, " + reader + ", READ");
+			}
+		};
+		IAccessControlList old = submission.getAccessControl();
+		submission.setAccessControl(acl);
+		try {
+			try (Client c = new Client(submission.getLocalPort())) {
+				String ehlo = c.cmd("EHLO client.example");
+				assertTrue(ehlo.contains("AUTH SCRAM-SHA-256 SCRAM-SHA-1 PLAIN LOGIN"), ehlo);
+				String reply = scram(c, ScramMechanism.SHA_256, "carol", "carolpw");
+				assertTrue(reply.startsWith("235 2.7.0"), reply);
+				assertTrue(c.cmd("AUTH PLAIN x").startsWith("503"), "already authenticated");
+				assertTrue(c.cmd("MAIL FROM:<carol@a.test>").startsWith("250"));
+			}
+			try (Client c = new Client(submission.getLocalPort())) {
+				c.cmd("EHLO client.example");
+				assertTrue(scram(c, ScramMechanism.SHA_1, "carol", "carolpw").startsWith("235"));
+			}
+			try (Client c = new Client(submission.getLocalPort())) {
+				c.cmd("EHLO client.example");
+				String reply = scram(c, ScramMechanism.SHA_256, "carol", "wrong");
+				assertTrue(reply.startsWith("535 5.7.8"), reply);
+				reply = scram(c, ScramMechanism.SHA_256, "reader", "pw");
+				assertTrue(reply.startsWith("535 5.7.8"), "READ only can't send: " + reply);
+				assertTrue(c.cmd("MAIL FROM:<reader@a.test>").startsWith("530"), "not logged in");
+			}
+		} finally {
+			submission.setAccessControl(old);
 		}
 	}
 

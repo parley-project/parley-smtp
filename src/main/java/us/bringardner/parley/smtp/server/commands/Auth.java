@@ -77,7 +77,12 @@ public class Auth extends BaseCommand {
 		});
 		switch (outcome.getStatus()) {
 		case SUCCESS:
-			p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
+			// PLAIN and LOGIN logged in while checking the password; SCRAM proved the user without one
+			if (p.isAuthenticated() || p.loginVerified(outcome.getUser())) {
+				p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
+			} else {
+				p.authFailed();
+			}
 			break;
 		case FAILED:
 			p.authFailed();

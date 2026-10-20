@@ -394,7 +394,20 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	 * WRITE permission to send mail.
 	 */
 	public boolean login(String user, String password) {
-		IPrincipal p = authenticate(user, password);
+		return completeLogin(authenticate(user, password));
+	}
+
+	/**
+	 * Log in a user a SASL mechanism has already proven (AUTH SCRAM-*): the same permission check
+	 * as {@link #login(String, String)}.
+	 *
+	 * @since 1.1.0
+	 */
+	public boolean loginVerified(String user) {
+		return completeLogin(verifiedPrincipal(user));
+	}
+
+	private boolean completeLogin(IPrincipal p) {
 		if (p == null || !getServer().isAuthorized(p, SmtpCommand.SEND_PERMISSION)) {
 			return false;
 		}
