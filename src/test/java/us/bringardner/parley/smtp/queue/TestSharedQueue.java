@@ -237,6 +237,52 @@ public class TestSharedQueue {
 		}, 10000, "the lock once the delivery ended");
 	}
 
+	/** Content left without an envelope (a crash mid-commit) is removed once it is old; a live one isn't. */
+	@Test
+	public void oldContentWithoutAnEnvelopeIsRemoved() throws Exception {
+		dir.mkdirs();
+		FileSource fresh = dir.getChild("FRESHID.eml");
+		FileSource old = dir.getChild("OLDID.eml");
+		for (FileSource f : new FileSource[] { fresh, old }) {
+			try (OutputStream out = f.getOutputStream()) {
+				out.write("Subject: x\r\n\r\nx\r\n".getBytes(StandardCharsets.UTF_8));
+			}
+		}
+		old.setLastModified(System.currentTimeMillis() - MailQueue.STALE_MILLIS - 60_000);
+		String live = MailQueue.newId();
+		writeEntry(live, Long.MAX_VALUE / 2);
+		dir.getChild(live + ".eml").setLastModified(System.currentTimeMillis() - MailQueue.STALE_MILLIS - 60_000);
+		q1.start();
+		assertTrue(fresh.exists(), "another server may be committing it");
+		assertFalse(old.exists(), "left by a commit a crash cut short");
+		assertTrue(dir.getChild(live + ".eml").exists(), "an old message with its envelope stays");
+		fresh.delete();
+	}
+
+	/** Unshared, content without an envelope goes at start. */
+	@Test
+	public void anUnsharedQueueRemovesContentWithoutAnEnvelopeAtStart() throws Exception {
+		FileSource alone = FileSourceFactory.getDefaultFactory().createTempDirectory("aloneQueue");
+		try {
+			FileSource orphan = alone.getChild("ORPHAN.eml");
+			try (OutputStream out = orphan.getOutputStream()) {
+				out.write("Subject: x\r\n\r\nx\r\n".getBytes(StandardCharsets.UTF_8));
+			}
+			DeliveryConfig c = new DeliveryConfig();
+			c.setMaildropRoot(alone);
+			MailQueue q = new MailQueue(alone, c); // not under a maildrop root with locks: unshared
+			q.start();
+			try {
+				assertFalse(q.isShared());
+				assertFalse(orphan.exists());
+			} finally {
+				q.stop();
+			}
+		} finally {
+			deleteAll(alone);
+		}
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	/** An entry written as another server would: content, then envelope. */

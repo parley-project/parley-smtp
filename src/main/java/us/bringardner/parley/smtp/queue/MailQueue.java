@@ -203,9 +203,10 @@ public class MailQueue {
 	/**
 	 * Bring the entries in line with the directory: load envelopes this queue doesn't know yet
 	 * (other servers' messages, or all of them at start), drop entries whose envelope is gone
-	 * (delivered by another server) and remove leftover temporary files. Files are only
-	 * removed when no other server can be using them: unshared, everything left over from
-	 * before a crash goes at start; shared, only temporary files older than an hour.
+	 * (delivered by another server) and remove leftover temporary files and message contents
+	 * without an envelope (a commit cut short by a crash). Files are only removed when no other
+	 * server can be using them: unshared, everything left over from before a crash goes at
+	 * start; shared, only files older than an hour.
 	 */
 	void syncWithDirectory(boolean starting) throws IOException {
 		FileSource[] list = dir.listFiles();
@@ -215,8 +216,12 @@ public class MailQueue {
 		boolean shared = isShared();
 		long now = System.currentTimeMillis();
 		Set<String> onDisk = new HashSet<>();
+		java.util.Map<String, FileSource> contents = new java.util.HashMap<>();
 		for (FileSource f : list) {
 			String name = f.getName();
+			if (!name.startsWith(".") && name.endsWith(".eml")) {
+				contents.put(name.substring(0, name.length() - 4), f);
+			}
 			if (name.startsWith(".")) {
 				if (shared ? isStale(f, now) : starting) {
 					f.delete(); // an incomplete message or envelope from before a crash
@@ -241,6 +246,31 @@ public class MailQueue {
 					if (damaged.add(name)) {
 						LOG.log(Level.WARNING, "Skipping damaged queue file " + name, e);
 					}
+				}
+			}
+		}
+		// content with no envelope: a commit that stopped between the two (a crash); the sender
+		// never got its 250, so it sends again. Removed like the temporary files: unshared at start,
+		// shared once over an hour old (a commit in progress takes a moment)
+		// shared also under the entry's lock, so an envelope another server is replacing (missing for
+		// a moment on a store without an atomic replace) is never taken for one that is gone
+		LockDomain d = domain;
+		for (Map.Entry<String, FileSource> c : contents.entrySet()) {
+			String id = c.getKey();
+			if (onDisk.contains(id) || entries.containsKey(id) || !(shared ? isStale(c.getValue(), now) : starting)) {
+				continue;
+			}
+			NamedLock l = d == null ? null : d.request(lockName(d, id)).exclusive().reentrant(false).tryAcquire();
+			if (d != null && l == null) {
+				continue;
+			}
+			try {
+				if (!envelope(id).exists()) {
+					c.getValue().delete();
+				}
+			} finally {
+				if (l != null) {
+					l.close();
 				}
 			}
 		}
