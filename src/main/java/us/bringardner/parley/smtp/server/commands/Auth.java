@@ -80,12 +80,18 @@ public class Auth extends BaseCommand {
 			// PLAIN and LOGIN logged in while checking the password; SCRAM proved the user without one
 			if (p.isAuthenticated() || p.loginVerified(outcome.getUser())) {
 				p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
+			} else if (p.isLoginUnavailable()) {
+				p.authUnavailable();
 			} else {
 				p.authFailed();
 			}
 			break;
 		case FAILED:
-			p.authFailed();
+			if (authenticator.isUnavailable()) {
+				p.authUnavailable();
+			} else {
+				p.authFailed();
+			}
 			break;
 		case CANCELLED:
 			p.error(PARAMETER_ERROR, "5.0.0", "Authentication cancelled");

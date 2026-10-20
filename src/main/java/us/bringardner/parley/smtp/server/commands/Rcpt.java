@@ -95,7 +95,14 @@ public class Rcpt extends BaseCommand {
 		}
 		MailAddress a = path.getAddress();
 		if (s.isLocalDomain(a.getAsciiDomain())) {
-			LocalDelivery.Target target = p.getQueue().getLocalDelivery().find(a.getLocalPart());
+			LocalDelivery.Target target;
+			try {
+				target = p.getQueue().getLocalDelivery().find(a.getLocalPart());
+			} catch (IOException e) {
+				// the users can't be read now (the database is down, say): the client tries again later
+				p.error(LOCAL_ERROR, "4.3.0", "<" + a + ">: Recipient can't be checked now, try again later");
+				return;
+			}
 			if (target == null) {
 				p.error(MAILBOX_UNAVAILABLE, "5.1.1", "<" + a + ">: Recipient address rejected: User unknown");
 				return;

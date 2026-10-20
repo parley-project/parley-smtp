@@ -4,6 +4,10 @@
 
 ### Added
 
+- When the access control list can't answer (its database is down): AUTH gets `454 4.7.0` (RFC 4954, try again
+  later), not counted as a failure (`SmtpRequestProcessor.isLoginUnavailable()`); RCPT TO a local user gets
+  `451 4.3.0` instead of "user unknown", and queued mail for local users is tried again later instead of
+  bounced.
 - **SCRAM-SHA-256 and SCRAM-SHA-1** for `AUTH`, offered in EHLO when the server's access control list keeps SCRAM
   credentials for every user (parley-net 1.1.0: `FileBasedAcl --scram`, or parley-net-acl-jdbc). The user is
   logged in with `SmtpRequestProcessor.loginVerified(user)` after the proof, with the same permission checks as a password login.

@@ -23,6 +23,7 @@ import us.bringardner.parley.mail.Rfc2822Date;
 import us.bringardner.parley.net.IConnection;
 import us.bringardner.parley.mail.server.AbstractMailProcessor;
 import us.bringardner.parley.net.server.ICommand;
+import us.bringardner.parley.net.server.AccessControlUnavailableException;
 import us.bringardner.parley.net.server.IPrincipal;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
@@ -389,12 +390,30 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 
 	// ------------------------------------------------------------------ AUTH
 
+	private boolean loginUnavailable;
+
 	/**
 	 * Check a user name and password (SASLprep'd, RFC 4013). The user needs the
 	 * WRITE permission to send mail.
 	 */
 	public boolean login(String user, String password) {
-		return completeLogin(authenticate(user, password));
+		loginUnavailable = false;
+		try {
+			return completeLogin(checkLogin(user, password));
+		} catch (AccessControlUnavailableException e) {
+			logError("Can't check the login of " + user + ": " + e.getMessage());
+			loginUnavailable = true;
+			return false;
+		}
+	}
+
+	/**
+	 * @return true if the last login failed because the access control list couldn't answer
+	 * (answer 454, try again later), not because of the credentials
+	 * @since 1.1.0
+	 */
+	public boolean isLoginUnavailable() {
+		return loginUnavailable;
 	}
 
 	/**
@@ -404,7 +423,19 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	 * @since 1.1.0
 	 */
 	public boolean loginVerified(String user) {
-		return completeLogin(verifiedPrincipal(user));
+		loginUnavailable = false;
+		try {
+			return completeLogin(verifiedPrincipal(user));
+		} catch (AccessControlUnavailableException e) {
+			logError("Can't look up " + user + ": " + e.getMessage());
+			loginUnavailable = true;
+			return false;
+		}
+	}
+
+	/** Reply to an AUTH the access control list couldn't check: not counted as a failure (RFC 4954 454). */
+	public void authUnavailable() throws IOException {
+		reply(TEMP_AUTH_FAILURE, "4.7.0", "Temporary authentication failure, try again later");
 	}
 
 	private boolean completeLogin(IPrincipal p) {
