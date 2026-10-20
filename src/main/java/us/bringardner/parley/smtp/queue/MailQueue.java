@@ -83,6 +83,8 @@ public class MailQueue {
 	/** Damaged envelopes, reported once. */
 	private final Set<String> damaged = ConcurrentHashMap.newKeySet();
 	private volatile long syncMillis = 5000;
+	/** How long stop() waits for deliveries under way before returning (they still finish). */
+	volatile long stopWaitMillis = 30_000;
 	private long lastSync;
 
 	public MailQueue(FileSource dir, DeliveryConfig config) {
@@ -142,15 +144,41 @@ public class MailQueue {
 		}
 		running = false;
 		wake();
-		if (workers != null) {
-			workers.shutdown();
+		ExecutorService w = workers;
+		boolean done = true;
+		if (w != null) {
+			w.shutdown();
 			try {
-				workers.awaitTermination(30, TimeUnit.SECONDS);
+				done = w.awaitTermination(stopWaitMillis, TimeUnit.MILLISECONDS);
 			} catch (InterruptedException e) {
 				Thread.currentThread().interrupt();
+				done = false;
 			}
 		}
-		releaseDomain();
+		if (done) {
+			releaseDomain();
+			return;
+		}
+		// a delivery is still under way (a slow remote server): its entry's lock must stay held
+		// (leases renewed) until it ends, or another server could take the entry over meanwhile
+		LockDomain d = domain;
+		domain = null;
+		LOG.log(Level.WARNING, "Queue workers are still delivering; the queue's locks are kept until they finish");
+		Thread t = new Thread(() -> {
+			try {
+				while (!w.awaitTermination(1, TimeUnit.MINUTES)) {
+					// still delivering
+				}
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			} finally {
+				if (d != null) {
+					MailLocks.release(d);
+				}
+			}
+		}, "SmtpQueueStop");
+		t.setDaemon(true);
+		t.start();
 	}
 
 	private void releaseDomain() {
