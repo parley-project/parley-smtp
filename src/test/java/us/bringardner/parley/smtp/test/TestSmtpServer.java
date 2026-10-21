@@ -46,7 +46,7 @@ import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.queue.DeliveryException;
 import us.bringardner.parley.smtp.queue.MxResolver;
 import us.bringardner.parley.smtp.server.SmtpServer;
-import us.bringardner.parley.pop3.test.TestPop3Server;
+import us.bringardner.parley.net.ServerTestSupport;
 
 /**
  * End-to-end tests of SmtpServer over real sockets. Server A (domain a.test)
@@ -75,9 +75,9 @@ public class TestSmtpServer {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		TestPop3Server.makeTestKeystore(new File(KEYSTORE));
+		ServerTestSupport.writeKeystore(new File(KEYSTORE));
 		System.setProperty("SmtpServer.KeyStoreName", KEYSTORE);
-		System.setProperty("SmtpServer.KeyStorePassword", TestPop3Server.KEYSTORE_PASSWORD);
+		System.setProperty("SmtpServer.KeyStorePassword", ServerTestSupport.KEYSTORE_PASSWORD);
 		System.setProperty("SmtpServer.KeyStoreType", "PKCS12");
 		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
