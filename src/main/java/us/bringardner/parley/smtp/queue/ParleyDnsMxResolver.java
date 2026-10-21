@@ -120,7 +120,7 @@ public class ParleyDnsMxResolver implements MxResolver {
 			}
 		}
 		if (ret.isEmpty()) {
-			throw new IOException("No DNS servers in /etc/resolv.conf; give them to ParleyDnsMxResolver (JSmtp.dnsServers)");
+			throw new IOException("No DNS servers in /etc/resolv.conf; give them to ParleyDnsMxResolver (parley.mail.smtp.dnsServers)");
 		}
 		return ret;
 	}

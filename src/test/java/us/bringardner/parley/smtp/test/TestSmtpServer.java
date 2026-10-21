@@ -72,11 +72,14 @@ public class TestSmtpServer {
 	@BeforeAll
 	public static void start() throws Exception {
 		ServerTestSupport.writeKeystore(new File(KEYSTORE));
-		System.setProperty("SmtpServer.KeyStoreName", KEYSTORE);
-		System.setProperty("SmtpServer.KeyStorePassword", ServerTestSupport.KEYSTORE_PASSWORD);
-		System.setProperty("SmtpServer.KeyStoreType", "PKCS12");
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
-		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
+		// The submission server reads its settings with its own prefix
+		for (String prefix : new String[] {SmtpServer.SMTP_PREFIX, SmtpServer.SUBMISSION_PREFIX}) {
+			System.setProperty(prefix + ".keyStoreName", KEYSTORE);
+			System.setProperty(prefix + ".keyStorePassword", ServerTestSupport.KEYSTORE_PASSWORD);
+			System.setProperty(prefix + ".keyStoreType", "PKCS12");
+			System.setProperty(prefix + "." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
+			System.setProperty(prefix + "." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
+		}
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("smtpA");
 		rootB = f.createTempDirectory("smtpB");
@@ -816,7 +819,7 @@ public class TestSmtpServer {
 		}, 60000, "large delivery");
 	}
 
-	/** The shared MaxLoginAttempts setting: 3 by default */
+	/** The shared maxLoginAttempts setting: 3 by default */
 	@Test
 	public void testMaxLoginAttempts() throws Exception {
 		for (int max : new int[] {3, 2}) {
@@ -837,7 +840,7 @@ public class TestSmtpServer {
 		}
 	}
 
-	/** LoginTimeLimit applies to submission, where a login is needed, not to receiving mail */
+	/** loginTimeLimit applies to submission, where a login is needed, not to receiving mail */
 	@Test
 	public void testLoginTimeLimit() throws Exception {
 		submission.setLoginTimeLimit(300);

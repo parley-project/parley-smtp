@@ -51,15 +51,25 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 
 	public static final String SMTP_NAME = "JSmtp";
-	public static final String CONFIG_PROP = SMTP_NAME + ".properties";
-	public static final String ROOT_PROP = SMTP_NAME + ".root";
-	public static final String FILE_SOURCE_PROP = SMTP_NAME + ".fileSource";
+	/** The prefix of the properties of an SMTP relay server (port 25). */
+	public static final String SMTP_PREFIX = "parley.mail.smtp";
+	/** The prefix of the properties of an SMTP relay server with implicit TLS. */
+	public static final String SMTPS_PREFIX = "parley.mail.smtps";
+	/** The prefix of the properties of a submission server (RFC 6409, port 587). */
+	public static final String SUBMISSION_PREFIX = "parley.mail.submission";
+	/** The prefix of the properties of a submission server with implicit TLS (RFC 8314, port 465). */
+	public static final String SUBMISSIONS_PREFIX = "parley.mail.submissions";
+	/** A properties file main loads into the system properties. */
+	public static final String CONFIG_PROP = SMTP_PREFIX + ".configFile";
+	/** The maildrop root, shared with POP3 and IMAP. */
+	public static final String ROOT_PROP = MAIL_ROOT_PROP;
+	public static final String FILE_SOURCE_PROP = MAIL_FILE_SOURCE_PROP;
 	public static final String QUEUE_DIRECTORY = ".smtp-queue";
 	/** Where DMARC aggregate report data waits to be sent, under the maildrop root. */
 	public static final String DMARC_REPORT_DIRECTORY = ".dmarc-reports";
 	public static final long DEFAULT_MAX_MESSAGE_SIZE = 50L * 1024 * 1024;
 
-	private static final String P = SMTP_NAME + ".";
+	private static final String P = SMTP_PREFIX + ".";
 
 	private volatile String hostname;
 	private volatile boolean submission = Boolean.getBoolean(P + "submission");
@@ -76,7 +86,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private boolean queueStarted;
 
 	public SmtpServer(int port, String name, boolean secure) {
-		super(port, name, "SmtpServer", secure);
+		super(port, name, secure ? SMTPS_PREFIX : SMTP_PREFIX, secure);
 		initMe();
 		finishInit();
 	}
@@ -98,18 +108,20 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/**
-	 * Starts the relay server (JSmtp.port, default 25) and, if JSmtp.submissionPort
-	 * (default 587; 0 for none) and JSmtp.submissionsPort (implicit TLS, default 0)
-	 * are set, submission servers sharing its queue.
+	 * Starts the relay server (parley.mail.smtp.port, default 25) and, unless
+	 * parley.mail.submission.port (default 587) is 0, and if parley.mail.submissions.port
+	 * (implicit TLS, default 0) is set, submission servers sharing its queue. Each server reads
+	 * its own settings (key store, limits, access control) with its prefix: parley.mail.smtp,
+	 * parley.mail.submission and parley.mail.submissions.
 	 */
 	public static void main(String[] args) throws Exception {
 		ServerMain.configure("SmtpServer", args, CONFIG_PROP);
 		boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
-		int port = Integer.getInteger(P + "port", SMTP_PORT);
+		int port = Integer.getInteger((secure ? SMTPS_PREFIX : SMTP_PREFIX) + ".port", SMTP_PORT);
 		SmtpServer relay = new SmtpServer(port, SMTP_NAME, secure);
 		relay.start();
 		System.out.println("SmtpServer started on port " + port);
-		int sub = Integer.getInteger(P + "submissionPort", SUBMISSION_PORT);
+		int sub = Integer.getInteger(SUBMISSION_PREFIX + ".port", SUBMISSION_PORT);
 		if (sub > 0) {
 			SmtpServer s = new SmtpServer(sub, SMTP_NAME, false);
 			s.setSubmission(true);
@@ -117,7 +129,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			s.start();
 			System.out.println("Submission server started on port " + sub);
 		}
-		int subs = Integer.getInteger(P + "submissionsPort", 0);
+		int subs = Integer.getInteger(SUBMISSIONS_PREFIX + ".port", 0);
 		if (subs > 0) {
 			SmtpServer s = new SmtpServer(subs, SMTP_NAME, true);
 			s.setSubmission(true);
@@ -141,7 +153,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		setMaxIdleConnection(Long.MAX_VALUE / 2);
 
 		setRequireTls(Boolean.getBoolean(P + "requireTls"));
-		initMaildropRoot(FILE_SOURCE_PROP, "JPop3.fileSource", ROOT_PROP, "JPop3.root", "/pop3", "C:/pop3");
+		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, "/pop3", "C:/pop3");
 
 		hostname = System.getProperty(P + "hostname");
 		if (hostname == null) {
@@ -454,8 +466,23 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/** Submission mode (RFC 6409): AUTH is required, and Date and Message-ID are added if missing. */
+	/**
+	 * Make this a submission server (RFC 6409), or not. A server made a submission server
+	 * with this reads its settings with the {@value #SUBMISSION_PREFIX} prefix
+	 * ({@value #SUBMISSIONS_PREFIX} with implicit TLS) instead of {@value #SMTP_PREFIX}.
+	 */
 	public void setSubmission(boolean submission) {
 		this.submission = submission;
+		String prefix = getPropertyPrefix();
+		if (submission && SMTP_PREFIX.equals(prefix)) {
+			setPropertyPrefix(SUBMISSION_PREFIX);
+		} else if (submission && SMTPS_PREFIX.equals(prefix)) {
+			setPropertyPrefix(SUBMISSIONS_PREFIX);
+		} else if (!submission && SUBMISSION_PREFIX.equals(prefix)) {
+			setPropertyPrefix(SMTP_PREFIX);
+		} else if (!submission && SUBMISSIONS_PREFIX.equals(prefix)) {
+			setPropertyPrefix(SMTPS_PREFIX);
+		}
 	}
 
 	public long getMaxMessageSize() {
@@ -484,22 +511,14 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/**
-	 * The shared LoginFailureDelay setting (see AbstractCoreServer) defaults to the older
-	 * JSmtp.loginFailureDelay system property, else 1000 ms.
-	 */
-	/**
 	 * Only submission needs a login: mail for local users arrives without one, so the
-	 * LoginTimeLimit applies only to a submission server.
+	 * loginTimeLimit applies only to a submission server.
 	 */
 	@Override
 	protected boolean isLoginRequired() {
 		return isSubmission();
 	}
 
-	@Override
-	protected int getDefaultLoginFailureDelay() {
-		return Integer.getInteger(P + "loginFailureDelay", DEFAULT_LOGIN_FAILURE_DELAY);
-	}
 
 	public int getMaxHops() {
 		return maxHops;

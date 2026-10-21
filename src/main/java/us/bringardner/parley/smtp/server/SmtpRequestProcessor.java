@@ -101,7 +101,7 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		super();
 		setCommandFactory(new SmtpCommandFactory());
 		setName("SmtpRequestProcessor");
-		setPropertyPrefix("SmtpRequestProcessor");
+		setPropertyPrefix("parley.mail.smtp.session");
 	}
 
 	public SmtpServer getSmtpServer() {

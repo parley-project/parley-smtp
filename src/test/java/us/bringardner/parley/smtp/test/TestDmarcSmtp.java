@@ -44,8 +44,8 @@ public class TestDmarcSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
-		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
+		System.setProperty("parley.mail.smtp." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
+		System.setProperty("parley.mail.smtp." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("dmarcA");
 		rootB = f.createTempDirectory("dmarcB");
