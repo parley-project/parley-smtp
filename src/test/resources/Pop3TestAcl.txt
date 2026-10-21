@@ -1,8 +1,0 @@
-#name , credentials, list of permissions, list of parameters
-tony   , secret , READ|WRITE
-reader , secret , READ
-team1  , secret , READ|WRITE , maildrop=team
-team2  , secret , READ|WRITE , maildrop=team
-nopop  , secret , WRITE
-hashed , {PBKDF2}210000:ON/Blt0Z/s6lkuGnopk6KQ==:L6Vfns8T4DkPsTzhtMZ72EWJQHkyYYQ5kjm6CO1jurI= , READ|WRITE
-jösé   , pässwörd , READ|WRITE

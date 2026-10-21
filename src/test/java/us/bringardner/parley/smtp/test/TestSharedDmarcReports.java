@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.test;
 
+import us.bringardner.parley.mail.test.MailTestSupport;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,7 +77,7 @@ public class TestSharedDmarcReports {
 			other.close();
 		}
 		MailLocks.release(domain);
-		TestSmtpServer.deleteAll(root);
+		MailTestSupport.deleteAll(root);
 		if (before == null) {
 			System.clearProperty(MailLocks.SHARED_STORE_PROPERTY);
 		} else {
@@ -87,7 +88,7 @@ public class TestSharedDmarcReports {
 	@BeforeEach
 	public void setUp() throws Exception {
 		dir = root.getChild(".dmarc-reports");
-		TestSmtpServer.deleteAll(dir);
+		MailTestSupport.deleteAll(dir);
 		txt.put("_dmarc.example.com", "v=DMARC1; p=none; rua=mailto:dmarc@example.com");
 		r1 = reporter(sent1);
 		r2 = reporter(sent2);

@@ -24,7 +24,7 @@
   the claim is given up (`releasingStore()`).
 - An envelope is written to a temporary file of its own and replaces the old one in one step where the store can.
 - A flush sends one aggregate report per policy domain, whatever log files its evaluations are in.
-- Dependencies: parley-mail and parley-net 1.1.0; parley-net's tests jar for tests. No longer parley-pop3, even for
+- Dependencies: parley-mail and parley-net 1.1.0; their tests jars for tests (the shared test users and helpers). No longer parley-pop3, even for
   tests.
 
 ## parley-smtp 1.0.0 (2026-10-16)

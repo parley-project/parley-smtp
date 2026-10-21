@@ -5,6 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
+import static us.bringardner.parley.mail.test.MailTestSupport.downAcl;
+import static us.bringardner.parley.mail.test.MailTestSupport.scramAcl;
+import static us.bringardner.parley.mail.test.MailTestSupport.scratchFile;
 
 import java.io.BufferedInputStream;
 import java.io.Closeable;
@@ -57,15 +62,6 @@ public class TestSmtpServer {
 
 	private static final String KEYSTORE = scratchFile("pop3keystore.p12");
 
-	/** A file in this run's own folder under the temp directory, so tests don't depend on target/ or the working directory. */
-	private static String scratchFile(String name) {
-		try {
-			return java.nio.file.Files.createTempDirectory("parley-smtp-tests").resolve(name).toString();
-		} catch (java.io.IOException e) {
-			throw new java.io.UncheckedIOException(e);
-		}
-	}
-
 	private static SmtpServer a;
 	private static SmtpServer submission;
 	private static SmtpServer b;
@@ -79,7 +75,7 @@ public class TestSmtpServer {
 		System.setProperty("SmtpServer.KeyStoreName", KEYSTORE);
 		System.setProperty("SmtpServer.KeyStorePassword", ServerTestSupport.KEYSTORE_PASSWORD);
 		System.setProperty("SmtpServer.KeyStoreType", "PKCS12");
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("smtpA");
@@ -146,18 +142,6 @@ public class TestSmtpServer {
 		}
 		deleteAll(rootA);
 		deleteAll(rootB);
-	}
-
-	static void deleteAll(FileSource f) throws IOException {
-		if (f == null) {
-			return;
-		}
-		if (f.isDirectory()) {
-			for (FileSource kid : f.listFiles()) {
-				deleteAll(kid);
-			}
-		}
-		f.delete();
 	}
 
 	// ------------------------------------------------------------------ helpers
@@ -466,14 +450,7 @@ public class TestSmtpServer {
 			assertFalse(ehlo.contains("SCRAM"), ehlo);
 			assertTrue(c.cmd("AUTH SCRAM-SHA-256").startsWith("504"));
 		}
-		final String carol = FileBasedAcl.hashPasswordWithScram("carolpw".toCharArray());
-		final String reader = FileBasedAcl.hashPasswordWithScram("pw".toCharArray());
-		IAccessControlList acl = new FileBasedAcl() {
-			{
-				parseLine("carol, " + carol + ", READ|WRITE");
-				parseLine("reader, " + reader + ", READ");
-			}
-		};
+		IAccessControlList acl = scramAcl();
 		IAccessControlList old = submission.getAccessControl();
 		submission.setAccessControl(acl);
 		try {
@@ -500,41 +477,6 @@ public class TestSmtpServer {
 		} finally {
 			submission.setAccessControl(old);
 		}
-	}
-
-	/** An access control list whose database is down: every lookup throws. */
-	static IAccessControlList downAcl() {
-		return new IAccessControlList() {
-				@Override
-				public void initialize(us.bringardner.parley.net.server.IServer s) {
-				}
-
-				@Override
-				public boolean checkPermission(us.bringardner.parley.net.server.IPrincipal user, us.bringardner.parley.net.server.IPermission action) {
-					return false;
-				}
-
-				@Override
-				public us.bringardner.parley.net.server.IPrincipal getPrincipal(String user) {
-					return null;
-				}
-
-				@Override
-				public us.bringardner.parley.net.server.IPrincipal findPrincipal(String user) throws us.bringardner.parley.net.server.AccessControlUnavailableException {
-					throw new us.bringardner.parley.net.server.AccessControlUnavailableException("the database is down");
-				}
-
-				@Override
-				public boolean supportsScram(String hash) {
-					return true;
-				}
-
-				@Override
-				public us.bringardner.parley.net.sasl.ScramCredentials getScramCredentials(String user, String hash)
-						throws us.bringardner.parley.net.server.AccessControlUnavailableException {
-					throw new us.bringardner.parley.net.server.AccessControlUnavailableException("the database is down");
-				}
-			};
 	}
 
 	@Test

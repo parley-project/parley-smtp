@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -338,15 +339,4 @@ public class TestSharedQueue {
 		}
 	}
 
-	private static void deleteAll(FileSource f) throws IOException {
-		if (f == null || !f.exists()) {
-			return;
-		}
-		if (f.isDirectory()) {
-			for (FileSource c : f.listFiles()) {
-				deleteAll(c);
-			}
-		}
-		f.delete();
-	}
 }

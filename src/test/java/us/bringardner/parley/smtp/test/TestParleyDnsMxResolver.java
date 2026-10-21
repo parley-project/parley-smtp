@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.File;
 import java.net.DatagramSocket;
@@ -279,7 +281,7 @@ public class TestParleyDnsMxResolver {
 		us.bringardner.parley.files.FileSourceFactory f = us.bringardner.parley.files.FileSourceFactory.getDefaultFactory();
 		us.bringardner.parley.files.FileSource rootA = f.createTempDirectory("dnsA");
 		us.bringardner.parley.files.FileSource rootB = f.createTempDirectory("dnsB");
-		System.setProperty("SmtpServer." + us.bringardner.parley.net.server.FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + us.bringardner.parley.net.server.FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + us.bringardner.parley.net.server.IServer.AUTHENTICATION_PROVIDER_PROPERTY,
 				us.bringardner.parley.net.server.FileBasedAcl.class.getName());
 		us.bringardner.parley.smtp.server.SmtpServer b = new us.bringardner.parley.smtp.server.SmtpServer(0, "JSmtp", false);
@@ -348,12 +350,4 @@ public class TestParleyDnsMxResolver {
 		assertTrue(m.contains("from mx.a.test ([127.0.0.1])"), m);
 	}
 
-	private static void deleteAll(us.bringardner.parley.files.FileSource f) throws java.io.IOException {
-		if (f.isDirectory()) {
-			for (us.bringardner.parley.files.FileSource k : f.listFiles()) {
-				deleteAll(k);
-			}
-		}
-		f.delete();
-	}
 }

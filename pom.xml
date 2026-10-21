@@ -99,6 +99,14 @@
 			<version>1.0.0</version>
 		</dependency>
 
+		<!-- Tests only: what the mail protocols' tests share (MailTestSupport, MailTestAcl.txt), in parley-mail's tests jar -->
+		<dependency>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-mail</artifactId>
+			<version>1.1.0-SNAPSHOT</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
 		<!-- Tests only: ServerTestSupport's test keystore (parley-net's tests jar). The mail protocols
 		     never depend on each other; what they share is in parley-mail (or parley-net). -->
 		<dependency>
