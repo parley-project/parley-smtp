@@ -20,6 +20,7 @@
 
 ### Changed (no code change needed)
 
+- Local delivery goes through parley-mail's `MailStore.deliver`, the one way new mail gets into a store.
 - The queue starts after the server has claimed the store (`AbstractMailServer.storeClaimed()`) and stops before
   the claim is given up (`releasingStore()`).
 - An envelope is written to a temporary file of its own and replaces the old one in one step where the store can.

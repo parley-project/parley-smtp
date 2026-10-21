@@ -13,9 +13,7 @@ import java.util.Locale;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.net.server.IAccessControlList;
 import us.bringardner.parley.net.server.IPrincipal;
-import us.bringardner.parley.mail.store.MailboxConstants;
 import us.bringardner.parley.mail.store.MailStore;
-import us.bringardner.parley.mail.store.Mailbox;
 import us.bringardner.parley.mail.store.MailboxRegistry;
 import us.bringardner.parley.smtp.MailAddress;
 
@@ -118,22 +116,6 @@ public final class LocalDelivery {
 	}
 
 	/**
-	 * The user's Junk mailbox: the one marked \\Junk (RFC 6154), else "Junk",
-	 * created (and marked) if missing.
-	 */
-	static String junkMailbox(MailStore store) throws IOException {
-		for (MailStore.Entry e : store.listAll()) {
-			if (MailboxConstants.JUNK.equalsIgnoreCase(e.specialUse) && !e.noselect) {
-				return e.name;
-			}
-		}
-		if (!store.exists("Junk")) {
-			store.create("Junk", MailboxConstants.JUNK);
-		}
-		return "Junk";
-	}
-
-	/**
 	 * Deliver a queued message to a user's INBOX, adding Return-Path (RFC 5321
 	 * section 4.4) and Delivered-To.
 	 *
@@ -144,12 +126,9 @@ public final class LocalDelivery {
 				+ "Delivered-To: " + recipient + "\r\n";
 		MailStore store = new MailStore(target.inbox, MailboxRegistry.get());
 		store.init(config.isCreateDefaultMailboxes());
-		Mailbox mb = store.open(entry.quarantine ? junkMailbox(store) : "INBOX");
 		try (InputStream in = new SequenceInputStream(new ByteArrayInputStream(header.getBytes(StandardCharsets.UTF_8)),
 				IoUtils.buffered(content.getInputStream()))) {
-			return mb.append(in, java.util.Set.of(), System.currentTimeMillis()).getUid();
-		} finally {
-			MailboxRegistry.get().release(mb);
+			return store.deliver(in, entry.quarantine).getUid();
 		}
 	}
 }
