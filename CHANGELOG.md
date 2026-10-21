@@ -1,5 +1,18 @@
 # Changelog
 
+## parley-smtp 2.0.0 (unreleased)
+
+### Changed (needs a configuration change)
+
+- **Property names** (Parley 2.0.0; the old names are no longer read): `JSmtp.*` is `parley.mail.smtp.*`
+  (`parley.mail.smtp.domains`, `.relayHost`, `.dkim.keys`, `.queue.retry` ...), and the maildrop root is the shared
+  `parley.mail.root` / `parley.mail.fileSource`. `JSmtp.properties` is `parley.mail.smtp.configFile`.
+- Each listener reads its own settings (key store, limits, access control) with its prefix: `parley.mail.smtp`
+  (was `SmtpServer`), `parley.mail.submission` for a submission server and `parley.mail.submissions` with
+  implicit TLS (`setSubmission(true)` switches the prefix). `JSmtp.submissionPort` / `JSmtp.submissionsPort` are
+  `parley.mail.submission.port` / `parley.mail.submissions.port`.
+- `JSmtp.loginFailureDelay` is now the server's `loginFailureDelay`.
+
 ## parley-smtp 1.1.0 (unreleased)
 
 ### Added

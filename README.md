@@ -19,7 +19,8 @@ Requires Java 11 or later. Depends on `parley-mail`, `parley-net` and `parley-dn
 > parley-smtp was split out of `us.bringardner:bjl_email` (BjlEmail). `us.bringardner.net.smtp` is now
 > `us.bringardner.parley.smtp`, and `BjlDnsMxResolver` is now `ParleyDnsMxResolver`. The `JSmtp.*` and
 > `SmtpServer.*` properties are unchanged; `JSmtp.resolver` now takes `parley-dns` and
-> `parley-dns-iterative`, and still accepts the old `bjldns` and `bjldns-iterative`.
+> `parley-dns-iterative`, and still accepts the old `bjldns` and `bjldns-iterative`. In 2.0.0 every property
+> was renamed (`parley.mail.smtp.*`, `parley.mail.submission.*`, `parley.mail.root`): see the CHANGELOG.
 
 ## Build
 
@@ -56,7 +57,7 @@ submission.start();
 relay.send(from, List.of(to), message);            // send mail from code
 ```
 
-Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -DJSmtp.domains=example.com -DJSmtp.root=/var/mail/pop3`. This starts port 25 and, unless `JSmtp.submissionPort=0`, port 587.
+Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.smtp.domains=example.com -Dparley.mail.root=/var/mail/pop3`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587.
 
 ### Protocol support
 
@@ -87,29 +88,29 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 
 ### Who can send what
 
-- **Mail for the local domains** (`JSmtp.domains`) is accepted from anyone, but only for existing users, aliases and `postmaster`. Unknown users get `550 5.1.1`. A `+detail` suffix is ignored when looking up the user.
-- **Mail for other domains** is accepted only from authenticated users (who need the WRITE permission) or from `JSmtp.relayNetworks`. Everyone else gets `550 5.7.1 Relay access denied`, so the server is not an open relay.
+- **Mail for the local domains** (`parley.mail.smtp.domains`) is accepted from anyone, but only for existing users, aliases and `postmaster`. Unknown users get `550 5.1.1`. A `+detail` suffix is ignored when looking up the user.
+- **Mail for other domains** is accepted only from authenticated users (who need the WRITE permission) or from `parley.mail.smtp.relayNetworks`. Everyone else gets `550 5.7.1 Relay access denied`, so the server is not an open relay.
 - **Submission servers** (port 587/465) require AUTH and add `Date` and `Message-ID` when they're missing.
-- **requireTls:** with `JSmtp.requireTls`, AUTH is offered only after STARTTLS. It is off by default, as for POP3 and IMAP; turn it on for submission on a public network.
+- **requireTls:** with `parley.mail.smtp.requireTls`, AUTH is offered only after STARTTLS. It is off by default, as for POP3 and IMAP; turn it on for submission on a public network.
 
 ### The queue and delivery
 
 - **Safe before 250:** accepted mail is written to `<root>/.smtp-queue` (an `.eml` and an `.env` file per message) before the server replies 250. It survives a restart.
 - **Local delivery** goes into the user's INBOX, the same maildrop POP3 and IMAP use. It adds `Return-Path` and `Delivered-To`. IMAP sessions in the same process see the new message at once.
-- **Aliases:** `JSmtp.aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
+- **Aliases:** `parley.mail.smtp.aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
 - **Remote delivery:**
   - The queue looks up MX records. With no MX record it uses the domain's own address, and a null MX means the domain takes no mail.
-  - Two resolvers are included, chosen with `JSmtp.resolver`:
+  - Two resolvers are included, chosen with `parley.mail.smtp.resolver`:
     - `jdk` (default): `DnsMxResolver`, the JDK's DNS provider.
-    - `parley-dns`: `ParleyDnsMxResolver`, which makes every DNS request with parley-dns: the MX query and the A/AAAA lookups of the mail hosts. It asks the servers in `JSmtp.dnsServers` (comma-separated), or those in `/etc/resolv.conf`, in turn.
+    - `parley-dns`: `ParleyDnsMxResolver`, which makes every DNS request with parley-dns: the MX query and the A/AAAA lookups of the mail hosts. It asks the servers in `parley.mail.smtp.dnsServers` (comma-separated), or those in `/etc/resolv.conf`, in turn.
     - `parley-dns-iterative`: parley-dns's own iterative resolver, which starts from the root servers in its `sbelt.prop`.
     - Any other `MxResolver` can be set with `getDeliveryConfig().setResolver(...)`.
   - It tries hosts in order of preference, with opportunistic STARTTLS.
   - It uses SIZE, 8BITMIME, SMTPUTF8, CHUNKING/BINARYMIME and DSN when the message needs them. A message needing SMTPUTF8 is returned (5.6.7) by a server without it, as RFC 6531 requires.
-- **Smart host:** set `JSmtp.relayHost=host:port` (with `JSmtp.relayUser`/`JSmtp.relayPassword`) to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`JSmtp.relayTls`).
-- **Retries:** temporary failures are retried on `JSmtp.queue.retry` (minutes, default `1,5,15,30,60,120`).
-  - The sender gets a "delayed" notice after `JSmtp.queue.delayWarningHours` (default 4).
-  - The message is returned after `JSmtp.queue.maxAgeHours` (default 120).
+- **Smart host:** set `parley.mail.smtp.relayHost=host:port` (with `parley.mail.smtp.relayUser`/`parley.mail.smtp.relayPassword`) to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`parley.mail.smtp.relayTls`).
+- **Retries:** temporary failures are retried on `parley.mail.smtp.queue.retry` (minutes, default `1,5,15,30,60,120`).
+  - The sender gets a "delayed" notice after `parley.mail.smtp.queue.delayWarningHours` (default 4).
+  - The message is returned after `parley.mail.smtp.queue.maxAgeHours` (default 120).
 - **Several servers on one queue:** set `parley.mail.sharedStore` (`off`, the default, `host` or `cluster`; see parley-mail) when servers share the maildrop root, and with it `.smtp-queue`.
   - Each delivery pass holds the message's lock in the store's lock domain (`queue/.smtp-queue/<id>`). A message another server is working on is skipped, not waited for.
   - A pass starts from the envelope as it is on disk, so no server repeats a delivery another made or overwrites its progress. A message another server finished is dropped.
@@ -125,7 +126,7 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 
 The server signs outgoing mail and verifies the signatures of incoming mail. The code is in `us.bringardner.parley.smtp.dkim`, and all DNS lookups go through parley-dns.
 
-**Signing.** Mail from authenticated users and from `JSmtp.relayNetworks` is signed with the key of its From domain. A key for `example.com` also signs mail from `news.example.com`. Bounces and mail sent from code (`send`, `MailQueue.enqueue`) are signed the same way. Mail with no matching key is sent unsigned.
+**Signing.** Mail from authenticated users and from `parley.mail.smtp.relayNetworks` is signed with the key of its From domain. A key for `example.com` also signs mail from `news.example.com`. Bounces and mail sent from code (`send`, `MailQueue.enqueue`) are signed the same way. Mail with no matching key is sent unsigned.
 
 - RSA keys sign with `rsa-sha256`, and Ed25519 keys with `ed25519-sha256` (RFC 8463; Ed25519 needs Java 15 or later at run time).
 - Signatures use relaxed/relaxed canonicalization. They cover the usual fields (From, To, Cc, Subject, Date, Message-ID, MIME fields, List-* fields...), and the main ones are "over-signed" so a second From or Subject can't be added later.
@@ -137,13 +138,13 @@ To set up a key:
 java -cp parley-smtp.jar:... us.bringardner.parley.smtp.dkim.DkimKeys rsa /etc/dkim/example.com.pem
 ```
 
-This writes the private key (PKCS#8 PEM) and prints the TXT record to publish at `<selector>._domainkey.example.com`, for example `mail2026._domainkey.example.com`. Then set `JSmtp.dkim.keys=example.com:mail2026:/etc/dkim/example.com.pem`, with more keys separated by commas. Keys from openssl work too (`-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----`), but not encrypted ones. In code:
+This writes the private key (PKCS#8 PEM) and prints the TXT record to publish at `<selector>._domainkey.example.com`, for example `mail2026._domainkey.example.com`. Then set `parley.mail.smtp.dkim.keys=example.com:mail2026:/etc/dkim/example.com.pem`, with more keys separated by commas. Keys from openssl work too (`-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----`), but not encrypted ones. In code:
 
 ```java
 relay.getDkim().addSigner(new DkimSigner("example.com", "mail2026", DkimKeys.privateKey(new File("/etc/dkim/example.com.pem"))));
 ```
 
-**Verifying.** Mail from other servers (clients that are neither authenticated nor in `JSmtp.relayNetworks`) is checked, and the result is added after our Received field:
+**Verifying.** Mail from other servers (clients that are neither authenticated nor in `parley.mail.smtp.relayNetworks`) is checked, and the result is added after our Received field:
 
 ```
 Authentication-Results: mx.example.com;
@@ -152,13 +153,13 @@ Authentication-Results: mx.example.com;
 
 - The results are `pass`, `fail` (the body or header hash doesn't match), `permerror` (bad signature, no key, revoked key, rsa-sha1, RSA keys under 1024 bits), `temperror` (DNS failed), or `none` (no signature). Up to 5 signatures are checked.
 - The message is accepted whatever the result. Rejecting is a policy decision, for DMARC to make.
-- Authentication-Results fields that claim to come from this server (`JSmtp.hostname`) are removed first (RFC 8601 section 5).
+- Authentication-Results fields that claim to come from this server (`parley.mail.smtp.hostname`) are removed first (RFC 8601 section 5).
 - The body is hashed as it streams from the queue file, so large messages are never held in memory.
-- Keys are looked up with the `parley-dns` resolver's DNS servers when `JSmtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise the servers in `/etc/resolv.conf` are asked through parley-dns. Turn verification off with `JSmtp.dkim.verify=false`.
+- Keys are looked up with the `parley-dns` resolver's DNS servers when `parley.mail.smtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise the servers in `/etc/resolv.conf` are asked through parley-dns. Turn verification off with `parley.mail.smtp.dkim.verify=false`.
 
 ### SPF (RFC 7208)
 
-For mail from other servers (clients that are neither authenticated nor in `JSmtp.relayNetworks`), the server checks whether the client's address may send for the MAIL FROM domain. For a null reverse-path (`MAIL FROM:<>`, as in bounces), it checks the HELO name instead. The code is in `us.bringardner.parley.smtp.spf`, and every DNS query goes through parley-dns.
+For mail from other servers (clients that are neither authenticated nor in `parley.mail.smtp.relayNetworks`), the server checks whether the client's address may send for the MAIL FROM domain. For a null reverse-path (`MAIL FROM:<>`, as in bounces), it checks the HELO name instead. The code is in `us.bringardner.parley.smtp.spf`, and every DNS query goes through parley-dns.
 
 - **What's supported:** every mechanism (`all`, `include`, `a`, `mx`, `ptr`, `ip4`, `ip6`, `exists`), the `redirect` and `exp` modifiers, and macros. The processing limits apply: at most 10 DNS-querying terms, 2 void lookups, and 10 MX or PTR names.
 - **Recording the result:** a `Received-SPF` field (RFC 7208 section 9.1) goes after our Received field. The result is also added to Authentication-Results, next to the DKIM results:
@@ -171,87 +172,88 @@ For mail from other servers (clients that are neither authenticated nor in `JSmt
   	dkim=pass header.d=example.org ...
   ```
 - **Results:** `pass`, `fail`, `softfail`, `neutral`, `none`, `temperror` (DNS failed) or `permerror` (a broken record, or too many lookups).
-- **Rejecting:** by default the message is accepted whatever the result, so DMARC or a filter can decide. With `JSmtp.spf.rejectFail=true`, a `fail` is refused at MAIL FROM with `550 5.7.23 SPF validation failed:` followed by the domain's explanation (its `exp=` text).
+- **Rejecting:** by default the message is accepted whatever the result, so DMARC or a filter can decide. With `parley.mail.smtp.spf.rejectFail=true`, a `fail` is refused at MAIL FROM with `550 5.7.23 SPF validation failed:` followed by the domain's explanation (its `exp=` text).
 - **Forged headers:** Received-SPF and Authentication-Results fields that claim to come from this server are removed.
-- **DNS:** queries use the `parley-dns` resolver's DNS servers when `JSmtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise they go to the servers in `/etc/resolv.conf` through parley-dns.
-- **Turning it off:** set `JSmtp.spf.check=false`.
+- **DNS:** queries use the `parley-dns` resolver's DNS servers when `parley.mail.smtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise they go to the servers in `/etc/resolv.conf` through parley-dns.
+- **Turning it off:** set `parley.mail.smtp.spf.check=false`.
 
 ### DMARC (RFC 7489)
 
 For mail from other servers, the server combines the SPF and DKIM results with the policy the From domain publishes at `_dmarc.<domain>`. The code is in `us.bringardner.parley.smtp.dmarc`.
 
 - **Pass:** the message passes if a DKIM signature passed with a `d=` domain, or SPF passed with a domain, that is *aligned* with the From domain. Aligned means the same domain (strict, `adkim=s`/`aspf=s`), or the same organizational domain (relaxed, the default): `news.example.com` aligns with `example.com`.
-- **Organizational domains** come from the Public Suffix List. A copy (`public_suffix_list.dat`, MPL 2.0, from publicsuffix.org) is included. Point `JSmtp.dmarc.publicSuffixList` at a newer download to replace it.
+- **Organizational domains** come from the Public Suffix List. A copy (`public_suffix_list.dat`, MPL 2.0, from publicsuffix.org) is included. Point `parley.mail.smtp.dmarc.publicSuffixList` at a newer download to replace it.
 - **Policy lookup:** the record at `_dmarc.<From domain>`, else at `_dmarc.<organizational domain>`, where `sp=` applies to subdomains. A record whose `p=` is missing or invalid counts as `p=none` if it has a valid `rua=`; otherwise it is ignored. `pct=` sampling is honoured: mail outside the sample gets one step milder treatment.
 - **Recording the result:** it is added to Authentication-Results, e.g. `dmarc=fail (p=reject dis=reject) header.from=example.org`. The results are `pass`, `fail`, `none` (no policy), `temperror` (DNS) or `permerror` (no From field, several From fields, or From addresses in more than one domain).
-- **Enforcing:** with `JSmtp.dmarc.enforce=true`, `p=reject` is refused at the end of DATA with `550 5.7.1 Rejected by the DMARC policy of <domain>`. `p=quarantine` is delivered to the recipient's Junk mailbox: the IMAP `\Junk` mailbox, created if missing. Without it (the default) the result is only recorded.
+- **Enforcing:** with `parley.mail.smtp.dmarc.enforce=true`, `p=reject` is refused at the end of DATA with `550 5.7.1 Rejected by the DMARC policy of <domain>`. `p=quarantine` is delivered to the recipient's Junk mailbox: the IMAP `\Junk` mailbox, created if missing. Without it (the default) the result is only recorded.
 - **DNS:** lookups use parley-dns, the same way as DKIM keys.
-- **Turning it off:** set `JSmtp.dmarc.check=false`.
+- **Turning it off:** set `parley.mail.smtp.dmarc.check=false`.
 
 #### Reports
 
 Domains ask for reports with `rua=` (aggregate) and `ruf=` (failure) in their DMARC record. Both kinds are off by default.
 
-- **Aggregate reports** (`JSmtp.dmarc.aggregateReports=true`, RFC 7489 section 7.2):
+- **Aggregate reports** (`parley.mail.smtp.dmarc.aggregateReports=true`, RFC 7489 section 7.2):
   - Each evaluation is stored in `.dmarc-reports` under the maildrop root, so it survives restarts.
-  - Every `JSmtp.dmarc.reportIntervalHours` (default 24), each domain gets one XML report.
+  - Every `parley.mail.smtp.dmarc.reportIntervalHours` (default 24), each domain gets one XML report.
   - Identical messages share a row, with a count. The `disposition` is what was actually done; a fail that wasn't enforced is marked `local_policy`, and a pct= downgrade `sampled_out`.
   - The XML is gzipped and mailed as `<org>!<domain>!<begin>!<end>.xml.gz`, with the subject `Report Domain: <domain> Submitter: <org> Report-ID: <id>`.
-- **Failure reports** (`JSmtp.dmarc.failureReports=true`, section 7.3):
+- **Failure reports** (`parley.mail.smtp.dmarc.failureReports=true`, section 7.3):
   - Sent at once in the Abuse Reporting Format (RFC 6591): a `message/feedback-report` part, plus the message's header (never its body).
   - Sent when the domain's `fo=` options call for one: `0` (default) when nothing passed aligned, `1` when either SPF or DKIM didn't pass aligned, `d` when a DKIM signature failed, `s` when SPF failed.
-  - At most `JSmtp.dmarc.maxFailureReportsPerHour` (default 10) per domain. Never sent about a message that is itself a report.
+  - At most `parley.mail.smtp.dmarc.maxFailureReportsPerHour` (default 10) per domain. Never sent about a message that is itself a report.
 - **Report addresses:** only `mailto:` URIs are supported, and their size limits (`!10m`) are honoured. An address outside the policy domain's organization is used only if its domain agrees to take the reports (a `v=DMARC1` TXT record at `<policy domain>._report._dmarc.<report domain>`, section 7.1).
 - **Several servers:** with `parley.mail.sharedStore` on, each server stores its evaluations in logs of its own, under the store's "logs" lock (held shared while storing, exclusive while a flush takes the logs). One server sends at a time (the "send" lock; a server that finds it taken leaves the work to the holder), and each domain still gets one report with every server's evaluations. `.last-sent` keeps the servers' timers to about one sending per interval between them. The failure-report rate limit is counted per server.
-- **Sending:** reports go out through the queue from `JSmtp.dmarc.reportEmail` (default `postmaster@<hostname>`). They are DKIM-signed if a key fits that domain. `JSmtp.dmarc.reportOrgName` (default the host name) names the reporter.
+- **Sending:** reports go out through the queue from `parley.mail.smtp.dmarc.reportEmail` (default `postmaster@<hostname>`). They are DKIM-signed if a key fits that domain. `parley.mail.smtp.dmarc.reportOrgName` (default the host name) names the reporter.
 
 ### ARC (RFC 8617)
 
 Forwarding (an alias with members at other servers, a mailing list) breaks SPF, and changes made along the way break DKIM, so forwarded mail can fail DMARC at the next server. ARC lets each server that handles a message record what it found, in a chain of sealed ARC sets the next server can check. The code is in `us.bringardner.parley.smtp.dkim` (`ArcVerifier`, `ArcSealer`, `Arc`).
 
 - **Validating:** for mail from other servers, the chain is checked: its structure, the newest ARC-Message-Signature and every ARC-Seal. The result goes in Authentication-Results, e.g. `arc=pass (as[2].d=lists.example.org as[1].d=example.com) smtp.remote-ip=192.0.2.1`; `arc=fail` comes with a `reason=`. Keys are found the same way as DKIM keys.
-- **Trusted sealers:** with `JSmtp.dmarc.enforce=true`, mail that fails DMARC is still delivered normally when its chain passes and the newest seal is from a domain in `JSmtp.arc.trustedSealers` (organizational domains compared), as in section 7.2. The DMARC aggregate report marks this as `local_policy` with a comment naming the seals and the first hop's IP address (section 7.2.2).
+- **Trusted sealers:** with `parley.mail.smtp.dmarc.enforce=true`, mail that fails DMARC is still delivered normally when its chain passes and the newest seal is from a domain in `parley.mail.smtp.arc.trustedSealers` (organizational domains compared), as in section 7.2. The DMARC aggregate report marks this as `local_policy` with a comment naming the seals and the first hop's IP address (section 7.2.2).
 - **Sealing:** when mail received from another server is forwarded to another server, an ARC set is added before it goes, once per message. The ARC-Authentication-Results copy our Authentication-Results, and the seal's `cv=` is our `arc=` result. Mail from our own users is DKIM-signed instead.
-- **Keys:** sets are sealed with the DKIM key (`JSmtp.dkim.keys`) of `JSmtp.arc.domain` (default the host name), or of its closest parent domain: a key for `example.com` seals for `mx.example.com`. ARC defines only `rsa-sha256`, so an Ed25519 key doesn't seal; with no RSA key that fits, nothing is sealed.
+- **Keys:** sets are sealed with the DKIM key (`parley.mail.smtp.dkim.keys`) of `parley.mail.smtp.arc.domain` (default the host name), or of its closest parent domain: a key for `example.com` seals for `mx.example.com`. ARC defines only `rsa-sha256`, so an Ed25519 key doesn't seal; with no RSA key that fits, nothing is sealed.
 - **Format:** tags are written in sorted order and long `b=` values in lines of 72 characters, like dkimpy, so the sets are byte-for-byte those of the reference implementation.
-- **Turning it off:** set `JSmtp.arc.verify=false` or `JSmtp.arc.seal=false`.
+- **Turning it off:** set `parley.mail.smtp.arc.verify=false` or `parley.mail.smtp.arc.seal=false`.
 
 ### Configuration
 
 | Property | Default | Meaning |
 |---|---|---|
-| `JSmtp.port` | 25 | Relay port (used by `main`) |
-| `JSmtp.submissionPort` / `JSmtp.submissionsPort` | 587 / 0 | Submission ports started by `main` (0 = none); 465 uses implicit TLS |
-| `JSmtp.root` | `JPop3.root`, else `/pop3` | Maildrop root, shared with POP3 and IMAP; the queue is `.smtp-queue` inside it |
-| `JSmtp.hostname` | the local host name | Name in the greeting, Received headers and notifications |
-| `JSmtp.domains` | the host name | Local domains, comma-separated |
-| `JSmtp.relayNetworks` | none | Networks that may relay without AUTH, e.g. `127.0.0.1/32,10.0.0.0/8` |
-| `JSmtp.requireTls` | false | AUTH (and MAIL on submission ports) only after STARTTLS |
-| `JSmtp.maxMessageSize` | 52428800 | SIZE limit |
-| `JSmtp.maxRecipients` | 100 | Recipients per message |
-| `JSmtp.timeout` | 300000 ms | Idle session timeout (RFC 5321 requires at least 5 minutes) |
-| `JSmtp.aliases`, `JSmtp.postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
-| `JSmtp.relayHost`, `JSmtp.relayUser`, `JSmtp.relayPassword`, `JSmtp.relayTls` | none, none, none, `required` | Smart host |
-| `JSmtp.relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
-| `JSmtp.resolver`, `JSmtp.dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns` |
-| `JSmtp.preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
-| `JSmtp.tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |
-| `JSmtp.queue.workers`, `JSmtp.queue.retry`, `JSmtp.queue.delayWarningHours`, `JSmtp.queue.maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Queue settings |
-| `JSmtp.dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
-| `JSmtp.dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
-| `JSmtp.dkim.verify` | true | Verify DKIM signatures of incoming mail and add Authentication-Results |
-| `JSmtp.spf.check` | true | Check SPF for incoming mail and add Received-SPF and Authentication-Results |
-| `JSmtp.spf.rejectFail` | false | Refuse MAIL FROM when the SPF result is `fail` (550 5.7.23) |
-| `JSmtp.dmarc.check` | true | Check DMARC for incoming mail and add the result to Authentication-Results |
-| `JSmtp.dmarc.enforce` | false | Act on the policy: refuse `p=reject` mail (550 5.7.1), deliver `p=quarantine` mail to Junk |
-| `JSmtp.dmarc.publicSuffixList` | the included copy | A newer `public_suffix_list.dat` for organizational domains |
-| `JSmtp.dmarc.aggregateReports`, `JSmtp.dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |
-| `JSmtp.dmarc.reportEmail`, `JSmtp.dmarc.reportOrgName` | `postmaster@<hostname>`, the host name | The reports' sender address and reporting organization |
-| `JSmtp.dmarc.reportIntervalHours`, `JSmtp.dmarc.maxFailureReportsPerHour` | 24, 10 | How often aggregate reports go out; failure reports per domain per hour |
-| `JSmtp.arc.verify`, `JSmtp.arc.seal` | true, true | Validate the ARC chains of incoming mail; seal received mail that is forwarded (if a DKIM key fits the seal domain) |
-| `JSmtp.arc.domain` | the host name | The `d=` of our ARC seals |
-| `JSmtp.arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
-| `SmtpServer.KeyStoreName`, `SmtpServer.KeyStorePassword`, `SmtpServer.KeyStoreType` | none | Key store for STARTTLS and port 465 |
+| `parley.mail.smtp.port` | 25 | Relay port (used by `main`) |
+| `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / 0 | Submission ports started by `main` (0 = none); 465 uses implicit TLS |
+| `parley.mail.root` | `/pop3` | Maildrop root, shared with POP3 and IMAP; the queue is `.smtp-queue` inside it |
+| `parley.mail.smtp.hostname` | the local host name | Name in the greeting, Received headers and notifications |
+| `parley.mail.smtp.domains` | the host name | Local domains, comma-separated |
+| `parley.mail.smtp.relayNetworks` | none | Networks that may relay without AUTH, e.g. `127.0.0.1/32,10.0.0.0/8` |
+| `parley.mail.smtp.requireTls` | false | AUTH (and MAIL on submission ports) only after STARTTLS |
+| `parley.mail.smtp.maxMessageSize` | 52428800 | SIZE limit |
+| `parley.mail.smtp.maxRecipients` | 100 | Recipients per message |
+| `parley.mail.smtp.timeout` | 300000 ms | Idle session timeout (RFC 5321 requires at least 5 minutes) |
+| `parley.mail.smtp.aliases`, `parley.mail.smtp.postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
+| `parley.mail.smtp.relayHost`, `parley.mail.smtp.relayUser`, `parley.mail.smtp.relayPassword`, `parley.mail.smtp.relayTls` | none, none, none, `required` | Smart host |
+| `parley.mail.smtp.relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
+| `parley.mail.smtp.resolver`, `parley.mail.smtp.dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns` |
+| `parley.mail.smtp.preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
+| `parley.mail.smtp.tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |
+| `parley.mail.smtp.queue.workers`, `parley.mail.smtp.queue.retry`, `parley.mail.smtp.queue.delayWarningHours`, `parley.mail.smtp.queue.maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Queue settings |
+| `parley.mail.smtp.dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
+| `parley.mail.smtp.dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
+| `parley.mail.smtp.dkim.verify` | true | Verify DKIM signatures of incoming mail and add Authentication-Results |
+| `parley.mail.smtp.spf.check` | true | Check SPF for incoming mail and add Received-SPF and Authentication-Results |
+| `parley.mail.smtp.spf.rejectFail` | false | Refuse MAIL FROM when the SPF result is `fail` (550 5.7.23) |
+| `parley.mail.smtp.dmarc.check` | true | Check DMARC for incoming mail and add the result to Authentication-Results |
+| `parley.mail.smtp.dmarc.enforce` | false | Act on the policy: refuse `p=reject` mail (550 5.7.1), deliver `p=quarantine` mail to Junk |
+| `parley.mail.smtp.dmarc.publicSuffixList` | the included copy | A newer `public_suffix_list.dat` for organizational domains |
+| `parley.mail.smtp.dmarc.aggregateReports`, `parley.mail.smtp.dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |
+| `parley.mail.smtp.dmarc.reportEmail`, `parley.mail.smtp.dmarc.reportOrgName` | `postmaster@<hostname>`, the host name | The reports' sender address and reporting organization |
+| `parley.mail.smtp.dmarc.reportIntervalHours`, `parley.mail.smtp.dmarc.maxFailureReportsPerHour` | 24, 10 | How often aggregate reports go out; failure reports per domain per hour |
+| `parley.mail.smtp.arc.verify`, `parley.mail.smtp.arc.seal` | true, true | Validate the ARC chains of incoming mail; seal received mail that is forwarded (if a DKIM key fits the seal domain) |
+| `parley.mail.smtp.arc.domain` | the host name | The `d=` of our ARC seals |
+| `parley.mail.smtp.arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
+| `parley.mail.smtp.keyStoreName`, `parley.mail.smtp.keyStorePassword`, `parley.mail.smtp.keyStoreType` | none | Key store for STARTTLS and port 465 |
+| `parley.mail.smtp.*` | | The listener's own settings use its prefix: the key store, the limits of parley-core's `AbstractCoreServer` (`maxConnections`, `maxLoginAttempts`, ...) and the access control list (`authenticationProvider`, `userFile`). A server with implicit TLS uses `parley.mail.smtps`. Submission servers use `parley.mail.submission`, and `parley.mail.submissions` with implicit TLS. |
 
 ### Not included
 
