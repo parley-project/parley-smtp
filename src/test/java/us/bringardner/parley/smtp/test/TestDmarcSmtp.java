@@ -1,6 +1,8 @@
 package us.bringardner.parley.smtp.test;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.IOException;
 import java.security.KeyPair;
@@ -42,7 +44,7 @@ public class TestDmarcSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("dmarcA");
@@ -103,18 +105,6 @@ public class TestDmarcSmtp {
 		}
 		deleteAll(rootA);
 		deleteAll(rootB);
-	}
-
-	private static void deleteAll(FileSource f) throws IOException {
-		if (f == null) {
-			return;
-		}
-		if (f.isDirectory()) {
-			for (FileSource kid : f.listFiles()) {
-				deleteAll(kid);
-			}
-		}
-		f.delete();
 	}
 
 	private static String send(SmtpServer via, String from, String data) throws IOException {

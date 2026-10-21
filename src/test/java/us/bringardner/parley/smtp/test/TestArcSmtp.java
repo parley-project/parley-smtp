@@ -2,6 +2,8 @@ package us.bringardner.parley.smtp.test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -43,7 +45,7 @@ public class TestArcSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		FileSourceFactory fs = FileSourceFactory.getDefaultFactory();
 		rootF = fs.createTempDirectory("arcF");
@@ -95,18 +97,6 @@ public class TestArcSmtp {
 		}
 		deleteAll(rootF);
 		deleteAll(rootR);
-	}
-
-	private static void deleteAll(FileSource file) throws IOException {
-		if (file == null) {
-			return;
-		}
-		if (file.isDirectory()) {
-			for (FileSource kid : file.listFiles()) {
-				deleteAll(kid);
-			}
-		}
-		file.delete();
 	}
 
 	/** Send to list@f.test from another server (not a relay client), envelope sender tony@f.test. */

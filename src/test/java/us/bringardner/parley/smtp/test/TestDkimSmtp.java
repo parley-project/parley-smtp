@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -48,7 +50,7 @@ public class TestDkimSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("dkimA");
@@ -95,18 +97,6 @@ public class TestDkimSmtp {
 		}
 		deleteAll(rootA);
 		deleteAll(rootB);
-	}
-
-	private static void deleteAll(FileSource f) throws IOException {
-		if (f == null) {
-			return;
-		}
-		if (f.isDirectory()) {
-			for (FileSource kid : f.listFiles()) {
-				deleteAll(kid);
-			}
-		}
-		f.delete();
 	}
 
 	/** Send through a server and wait for the message with {@code subject} to reach a maildrop. */

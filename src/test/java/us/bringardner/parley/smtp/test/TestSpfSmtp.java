@@ -2,6 +2,8 @@ package us.bringardner.parley.smtp.test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static us.bringardner.parley.mail.test.MailTestSupport.ACL_FILE;
+import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -28,7 +30,7 @@ public class TestSpfSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, "Pop3TestAcl.txt");
+		System.setProperty("SmtpServer." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("SmtpServer." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
 		rootB = FileSourceFactory.getDefaultFactory().createTempDirectory("spfB");
 		b = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
@@ -66,18 +68,6 @@ public class TestSpfSmtp {
 			b.stop();
 		}
 		deleteAll(rootB);
-	}
-
-	private static void deleteAll(FileSource f) throws IOException {
-		if (f == null) {
-			return;
-		}
-		if (f.isDirectory()) {
-			for (FileSource kid : f.listFiles()) {
-				deleteAll(kid);
-			}
-		}
-		f.delete();
 	}
 
 	private static String deliver(String helo, String from, String data, String subject) throws Exception {
