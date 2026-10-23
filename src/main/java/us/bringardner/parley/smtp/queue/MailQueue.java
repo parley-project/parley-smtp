@@ -18,6 +18,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -82,6 +83,7 @@ public class MailQueue {
 	private final Set<String> flushRequested = ConcurrentHashMap.newKeySet();
 	/** Damaged envelopes, reported once. */
 	private final Set<String> damaged = ConcurrentHashMap.newKeySet();
+	private final List<QueueListener> listeners = new CopyOnWriteArrayList<>();
 	private volatile long syncMillis = 5000;
 	/** How long stop() waits for deliveries under way before returning (they still finish). */
 	volatile long stopWaitMillis = 30_000;
@@ -322,6 +324,123 @@ public class MailQueue {
 		return entries.values();
 	}
 
+	/** The message with this queue id, or null if it isn't in the queue. */
+	public QueueEntry getEntry(String id) {
+		return id == null ? null : entries.get(id);
+	}
+
+	/**
+	 * The content (RFC 5322 message) of a message in the queue, for reading only; null if the
+	 * message isn't in the queue.
+	 */
+	public FileSource getContent(String id) throws IOException {
+		if (getEntry(id) == null) {
+			return null;
+		}
+		FileSource f = content(id);
+		return f.exists() ? f : null;
+	}
+
+	/**
+	 * Try one message's pending recipients now, ignoring the retry schedule.
+	 *
+	 * @return false if the message isn't in the queue
+	 */
+	public boolean retry(String id) {
+		QueueEntry e = getEntry(id);
+		if (e == null) {
+			return false;
+		}
+		if (domain != null) {
+			flushRequested.add(id);
+		}
+		synchronized (e) {
+			for (QueuedRecipient r : e.recipients) {
+				if (r.status == QueuedRecipient.Status.PENDING) {
+					r.nextAttempt = 0;
+				}
+			}
+		}
+		wake();
+		return true;
+	}
+
+	/**
+	 * Remove a message from the queue without delivering it or telling the sender (an
+	 * administrator's action, for spam stuck in the queue say). A message that is being
+	 * delivered right now, here or by another server sharing the queue, is not removed.
+	 *
+	 * @return true if it was removed; false if it isn't in the queue or is being delivered
+	 */
+	public boolean delete(String id) throws IOException {
+		QueueEntry e = getEntry(id);
+		if (e == null || !active.add(id)) {
+			return false;
+		}
+		try {
+			LockDomain d = domain;
+			NamedLock l = null;
+			if (d != null) {
+				l = d.request(lockName(d, id)).exclusive().reentrant(false).tryAcquire();
+				if (l == null) {
+					return false; // another server is delivering it
+				}
+			}
+			try {
+				QueueEvent event;
+				synchronized (e) {
+					if (l != null) {
+						l.checkValid();
+					}
+					entries.remove(id);
+					flushRequested.remove(id);
+					envelope(id).delete();
+					content(id).delete();
+					event = QueueEvent.of(QueueEvent.Type.DELETED, e);
+				}
+				fire(event);
+				return true;
+			} finally {
+				if (l != null) {
+					l.close();
+				}
+			}
+		} finally {
+			active.remove(id);
+		}
+	}
+
+	// ------------------------------------------------------------------ listeners
+
+	/** Be told about messages queued, delivery attempts and messages leaving the queue. */
+	public void addQueueListener(QueueListener listener) {
+		if (listener != null) {
+			listeners.add(listener);
+		}
+	}
+
+	public void removeQueueListener(QueueListener listener) {
+		listeners.remove(listener);
+	}
+
+	private void fire(QueueEvent event) {
+		for (QueueListener l : listeners) {
+			try {
+				l.queueEvent(event);
+			} catch (RuntimeException ex) {
+				LOG.log(Level.WARNING, "A queue listener failed on " + event, ex);
+			}
+		}
+	}
+
+	private void fire(List<QueueEvent> events) {
+		if (!listeners.isEmpty()) {
+			for (QueueEvent event : events) {
+				fire(event);
+			}
+		}
+	}
+
 	private void schedule() {
 		while (running) {
 			long now = System.currentTimeMillis();
@@ -402,6 +521,13 @@ public class MailQueue {
 			throw ex;
 		}
 		entries.put(e.id, e);
+		if (!listeners.isEmpty()) {
+			QueueEvent event;
+			synchronized (e) {
+				event = QueueEvent.of(QueueEvent.Type.QUEUED, e);
+			}
+			fire(event);
+		}
 		wake();
 	}
 
@@ -587,6 +713,8 @@ public class MailQueue {
 		List<String> successActions = new ArrayList<>();
 		List<QueuedRecipient> delayed = new ArrayList<>();
 		Map<String, List<QueuedRecipient>> remoteByDomain = new LinkedHashMap<>();
+		List<QueuedRecipient> attempted = new ArrayList<>();
+		List<QueueEvent> events = new ArrayList<>();
 
 		synchronized (e) {
 			// local recipients and alias expansion (the list can grow while we go)
@@ -598,6 +726,7 @@ public class MailQueue {
 				String domain = r.address.getAsciiDomain();
 				if (config.isLocalDomain(domain)) {
 					deliverLocal(e, content, r, succeeded, successActions);
+					attempted.add(r);
 				} else {
 					String key = config.getRelayHost() != null ? "" : domain;
 					remoteByDomain.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
@@ -613,6 +742,7 @@ public class MailQueue {
 				for (Map.Entry<QueuedRecipient, RemoteDelivery.Result> res : results.entrySet()) {
 					QueuedRecipient r = res.getKey();
 					RemoteDelivery.Result result = res.getValue();
+					attempted.add(r);
 					r.remoteMta = result.remoteMta;
 					if (result.error == null) {
 						r.status = QueuedRecipient.Status.DELIVERED;
@@ -659,6 +789,11 @@ public class MailQueue {
 			} else if (!failed.isEmpty()) {
 				LOG.log(Level.WARNING, "A bounce couldn't be delivered and is discarded: " + e);
 			}
+			if (!listeners.isEmpty()) {
+				for (QueuedRecipient r : attempted) {
+					events.add(QueueEvent.attempt(e, r));
+				}
+			}
 			if (e.isPending()) {
 				e.write(envelope(e.id), entryLock);
 			} else {
@@ -668,8 +803,12 @@ public class MailQueue {
 				entries.remove(e.id);
 				envelope(e.id).delete();
 				content.delete();
+				if (!listeners.isEmpty()) {
+					events.add(QueueEvent.of(QueueEvent.Type.COMPLETED, e));
+				}
 			}
 		}
+		fire(events);
 	}
 
 	private void retryLater(QueueEntry e, QueuedRecipient r, long now) {
@@ -690,7 +829,7 @@ public class MailQueue {
 		long now = System.currentTimeMillis();
 		LocalDelivery.Target target;
 		try {
-			target = local.find(r.address.getLocalPart());
+			target = local.find(r.address);
 		} catch (IOException ex) {
 			r.lastStatus = "4.3.0";
 			r.lastResult = "Local lookup failed: " + ex.getMessage();

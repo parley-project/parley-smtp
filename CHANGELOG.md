@@ -13,6 +13,19 @@
   `parley.mail.submission.port` / `parley.mail.submissions.port`.
 - `JSmtp.loginFailureDelay` is now the server's `loginFailureDelay`.
 
+### Added
+
+- **Queue events** for an application's history of the queue: `MailQueue.addQueueListener(QueueListener)` reports
+  `QueueEvent`s: QUEUED, then per recipient DELIVERED, DEFERRED, FAILED or EXPANDED after each attempt, and
+  COMPLETED when the message leaves the queue (DELETED for `delete`).
+- **Administering the queue:** `MailQueue.getEntry(id)`, `getContent(id)` (the message, to read), `retry(id)` (one
+  message now) and `delete(id)` (remove a message without delivering or bouncing it; never one being
+  delivered). `QueuedRecipient.getNextAttempt()`.
+- **Virtual domains:** with several local domains, an alias or user can belong to one domain (an alias
+  `sales@example.com`, a user named `tony@example.com`); those without a domain still receive mail for every local
+  domain. Aliases are looked up before users, and the full address before the local part (`+detail` ignored as
+  before) (`LocalDelivery.find(MailAddress)`, used by RCPT and local delivery).
+
 ## parley-smtp 1.1.0 (unreleased)
 
 ### Added
