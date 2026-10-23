@@ -70,7 +70,7 @@ public final class LocalDelivery {
 			addKeys(keys, local, "@" + domain.toLowerCase(Locale.ROOT));
 		}
 		addKeys(keys, local, "");
-		return find(keys, local);
+		return find(keys, local, true);
 	}
 
 	/**
@@ -81,7 +81,7 @@ public final class LocalDelivery {
 	public Target find(String localPart) throws IOException {
 		List<String> keys = new ArrayList<>(2);
 		addKeys(keys, localPart, "");
-		return find(keys, localPart);
+		return find(keys, localPart, false);
 	}
 
 	private static void addKeys(List<String> keys, String local, String suffix) {
@@ -92,16 +92,22 @@ public final class LocalDelivery {
 		}
 	}
 
-	private Target find(List<String> keys, String localPart) throws IOException {
-		// aliases first: they need no lookup in the user list (which may be unable to answer)
-		for (String k : keys) {
-			Target t = findAlias(k);
-			if (t != null) {
-				return t;
+	/**
+	 * @param aliasesFirst every key's alias before any key's user (so an alias needs no lookup in
+	 *                     the user list, which may be unable to answer); else each key's alias, then
+	 *                     its user, in turn (as find(String) always did)
+	 */
+	private Target find(List<String> keys, String localPart, boolean aliasesFirst) throws IOException {
+		if (aliasesFirst) {
+			for (String k : keys) {
+				Target t = findAlias(k);
+				if (t != null) {
+					return t;
+				}
 			}
 		}
 		for (String k : keys) {
-			Target t = findUser(k);
+			Target t = aliasesFirst ? findUser(k) : findExact(k);
 			if (t != null) {
 				return t;
 			}

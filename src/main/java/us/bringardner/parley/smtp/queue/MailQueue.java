@@ -520,14 +520,15 @@ public class MailQueue {
 			target.delete();
 			throw ex;
 		}
-		entries.put(e.id, e);
 		if (!listeners.isEmpty()) {
+			// before the entry is visible to the workers, so QUEUED always comes first
 			QueueEvent event;
 			synchronized (e) {
 				event = QueueEvent.of(QueueEvent.Type.QUEUED, e);
 			}
 			fire(event);
 		}
+		entries.put(e.id, e);
 		wake();
 	}
 
@@ -650,6 +651,9 @@ public class MailQueue {
 	void process(QueueEntry e) throws IOException {
 		LockDomain d = domain;
 		if (d == null) {
+			if (entries.get(e.id) != e) {
+				return; // deleted (or replaced) since the scheduler looked
+			}
 			process(e, null);
 			return;
 		}
