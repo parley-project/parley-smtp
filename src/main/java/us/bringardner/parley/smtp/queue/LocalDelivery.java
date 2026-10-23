@@ -7,6 +7,7 @@ import java.io.InputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -51,38 +52,86 @@ public final class LocalDelivery {
 	}
 
 	/**
+	 * What an address of a local domain means here. With several local domains (virtual domains)
+	 * an address can be an alias or a user of its own domain ({@code sales@example.com},
+	 * {@code tony@example.com}) or, as with one domain, of every local domain ({@code sales},
+	 * {@code tony}). Aliases are looked up first, the full address before the local part, then
+	 * users the same way; each with a {@code +detail} suffix, then without it. "postmaster" is
+	 * always accepted (RFC 5321 section 4.5.1).
+	 *
+	 * @return the target, or null if the address doesn't exist here
+	 * @throws IOException if the user list can't answer now (the recipient is tried again later)
+	 */
+	public Target find(MailAddress address) throws IOException {
+		String local = address.getLocalPart();
+		String domain = address.getAsciiDomain();
+		List<String> keys = new ArrayList<>(4);
+		if (domain != null && !domain.isEmpty()) {
+			addKeys(keys, local, "@" + domain.toLowerCase(Locale.ROOT));
+		}
+		addKeys(keys, local, "");
+		return find(keys, local);
+	}
+
+	/**
 	 * Find a local part: an alias, a user, or "postmaster" (always accepted, RFC
 	 * 5321 section 4.5.1). A "+detail" suffix is ignored if the full local part
 	 * isn't known. Returns null for an unknown local part.
 	 */
 	public Target find(String localPart) throws IOException {
-		Target t = findExact(localPart);
-		if (t == null) {
-			int plus = localPart.indexOf('+');
-			if (plus > 0) {
-				t = findExact(localPart.substring(0, plus));
-			}
-		}
-		if (t == null && localPart.equalsIgnoreCase("postmaster")) {
-			Target pm = config.getPostmaster().equalsIgnoreCase("postmaster") ? null : findExact(config.getPostmaster());
-			t = pm != null ? pm : new Target("postmaster", inbox("postmaster"), null);
-		}
-		return t;
+		List<String> keys = new ArrayList<>(2);
+		addKeys(keys, localPart, "");
+		return find(keys, localPart);
 	}
 
-	private Target findExact(String localPart) throws IOException {
-		String lower = localPart.toLowerCase(Locale.ROOT);
-		List<String> alias = config.getAliases().get(lower);
-		if (alias != null) {
-			return new Target(null, null, alias);
+	private static void addKeys(List<String> keys, String local, String suffix) {
+		keys.add(local + suffix);
+		int plus = local.indexOf('+');
+		if (plus > 0) {
+			keys.add(local.substring(0, plus) + suffix);
 		}
+	}
+
+	private Target find(List<String> keys, String localPart) throws IOException {
+		// aliases first: they need no lookup in the user list (which may be unable to answer)
+		for (String k : keys) {
+			Target t = findAlias(k);
+			if (t != null) {
+				return t;
+			}
+		}
+		for (String k : keys) {
+			Target t = findUser(k);
+			if (t != null) {
+				return t;
+			}
+		}
+		if (localPart.equalsIgnoreCase("postmaster")) {
+			Target pm = config.getPostmaster().equalsIgnoreCase("postmaster") ? null : findExact(config.getPostmaster());
+			return pm != null ? pm : new Target("postmaster", inbox("postmaster"), null);
+		}
+		return null;
+	}
+
+	private Target findExact(String name) throws IOException {
+		Target t = findAlias(name);
+		return t != null ? t : findUser(name);
+	}
+
+	private Target findAlias(String name) {
+		List<String> alias = config.getAliases().get(name.toLowerCase(Locale.ROOT));
+		return alias == null ? null : new Target(null, null, alias);
+	}
+
+	private Target findUser(String name) throws IOException {
 		IAccessControlList acl = config.getAccessControl();
 		if (acl == null) {
 			return null;
 		}
+		String lower = name.toLowerCase(Locale.ROOT);
 		// a list that can't answer throws (an IOException): the recipient is tried again later, not refused
-		IPrincipal p = acl.findPrincipal(localPart);
-		if (p == null && !lower.equals(localPart)) {
+		IPrincipal p = acl.findPrincipal(name);
+		if (p == null && !lower.equals(name)) {
 			p = acl.findPrincipal(lower);
 		}
 		if (p == null) {
@@ -92,7 +141,6 @@ public final class LocalDelivery {
 		return new Target(p.getName(), inbox(param != null ? param.toString() : p.getName()), null);
 	}
 
-	/** A maildrop directory for a path relative to the root (".." can't leave it). */
 	FileSource inbox(String path) throws IOException {
 		ArrayDeque<String> segments = new ArrayDeque<>();
 		for (String s : path.replace('\\', '/').split("/")) {

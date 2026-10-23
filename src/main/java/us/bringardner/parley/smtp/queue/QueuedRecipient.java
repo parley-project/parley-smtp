@@ -67,6 +67,11 @@ public final class QueuedRecipient {
 		return attempts;
 	}
 
+	/** When a pending recipient is tried next (milliseconds since the epoch; 0 means now). */
+	public long getNextAttempt() {
+		return nextAttempt;
+	}
+
 	public String getLastResult() {
 		return lastResult;
 	}

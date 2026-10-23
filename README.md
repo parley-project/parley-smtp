@@ -98,6 +98,8 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 - **Safe before 250:** accepted mail is written to `<root>/.smtp-queue` (an `.eml` and an `.env` file per message) before the server replies 250. It survives a restart.
 - **Local delivery** goes into the user's INBOX, the same maildrop POP3 and IMAP use. It adds `Return-Path` and `Delivered-To`. IMAP sessions in the same process see the new message at once.
 - **Aliases:** `parley.mail.smtp.aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
+- **Several domains (virtual domains):** list them all in `parley.mail.smtp.domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` parameter, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
+- **Queue events and administration:** `MailQueue.addQueueListener` reports each message queued, each delivery attempt (DELIVERED, DEFERRED, FAILED, EXPANDED) and each message leaving the queue, so an application can keep a history. `getEntry`, `getContent`, `retry(id)`, `flush()` and `delete(id)` let an administrator look at and act on the messages waiting.
 - **Remote delivery:**
   - The queue looks up MX records. With no MX record it uses the domain's own address, and a null MX means the domain takes no mail.
   - Two resolvers are included, chosen with `parley.mail.smtp.resolver`:
