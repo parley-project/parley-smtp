@@ -2,8 +2,20 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Added
+
+- **`SmtpProviders`**: parley-net `ServerProvider`s `smtp`, `submission` and `submissions`, so SMTP runs alone or with
+  other servers in one process (parley-net's `ServerMain`), and is managed with JMX. The SMTP servers of a process share
+  one queue (made when the first starts, let go when the last stops), which is the JMX bean
+  `us.bringardner.parley:type=MailQueue,name=smtp` (`MailQueueMXBean`, `QueuedMessageInfo`, `QueuedRecipientInfo`).
+- **The queue's history** (`QueueHistory`): every `QueueEvent` as a JSON line in `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl`,
+  30 days kept (`parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays`). `SmtpServer.getQueueHistory()`.
+
 ### Changed
 
+- `SmtpServer.main` runs the providers with `ServerMain.launch`: `parley-mail.properties` is read before
+  `parley-smtp.properties`, and `submissions` runs when `parley.mail.submissions.port` is set. With every port 0 it
+  says there is nothing to run.
 - **`SmtpServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
   line (which wins) and `parley-smtp.properties` in Parley's administrator folder (`/etc/parley`, or the file the server's
   `configFile` property names); it stops on SIGTERM; the relay and the submission servers start and stop together; a failed start exits with 1.
