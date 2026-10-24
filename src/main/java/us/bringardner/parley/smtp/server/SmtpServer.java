@@ -119,8 +119,12 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			java.util.List<ServerMain.Service> servers = new java.util.ArrayList<ServerMain.Service>();
 			boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
 			int port = Integer.getInteger((secure ? SMTPS_PREFIX : SMTP_PREFIX) + ".port", SMTP_PORT);
-			SmtpServer relay = new SmtpServer(port, SMTP_NAME, secure);
-			servers.add(ServerMain.service(relay, "SmtpServer"));
+			// the relay (MX) owns the queue the submission servers share; with its port 0 it doesn't listen,
+			// and the queue runs with the submission servers
+			SmtpServer relay = new SmtpServer(Math.max(port, 0), SMTP_NAME, secure);
+			if (port > 0) {
+				servers.add(ServerMain.service(relay, "SmtpServer"));
+			}
 			int sub = Integer.getInteger(SUBMISSION_PREFIX + ".port", SUBMISSION_PORT);
 			if (sub > 0) {
 				SmtpServer s = new SmtpServer(sub, SMTP_NAME, false);
@@ -134,6 +138,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				s.setSubmission(true);
 				s.setQueue(relay.getQueue());
 				servers.add(ServerMain.service(s, "Submission server (implicit TLS)"));
+			}
+			if (servers.isEmpty()) {
+				throw new IllegalStateException("Every SMTP port is 0: nothing to run");
 			}
 			return servers;
 		});

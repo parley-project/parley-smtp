@@ -223,7 +223,7 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.mail.smtp.port` | 25 | Relay port (used by `main`) |
+| `parley.mail.smtp.port` | 25 | Relay (MX) port (used by `main`); 0: no relay listener, and the queue runs with the submission servers |
 | `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / 0 | Submission ports started by `main` (0 = none); 465 uses implicit TLS |
 | `parley.mail.root` | `/pop3` | Maildrop root, shared with POP3 and IMAP; the queue is `.smtp-queue` inside it |
 | `parley.mail.smtp.hostname` | the local host name | Name in the greeting, Received headers and notifications |
