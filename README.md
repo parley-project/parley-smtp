@@ -57,7 +57,16 @@ submission.start();
 relay.send(from, List.of(to), message);            // send mail from code
 ```
 
-Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.smtp.domains=example.com -Dparley.mail.root=/var/mail/pop3`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587.
+Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.smtp.domains=example.com -Dparley.mail.root=/var/mail/pop3`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587 (and 465 when `parley.mail.submissions.port` is set), sharing one queue.
+
+`main` runs the providers `smtp`, `submission` and `submissions` (`SmtpProviders`) with parley-net's
+`ServerMain.launch`: settings from `parley-mail.properties` then `parley-smtp.properties` in the settings
+folder, the JVM's `-D` options and the command line; a port of 0 turns that server off. To run SMTP with
+other servers in one process, list the ids in parley-net's launcher (see parley-mail's README). The SMTP
+servers of a process share one queue, made when the first of them starts and let go when the last one
+stops (restart every SMTP server to apply changed delivery settings such as `parley.mail.smtp.domains`).
+While it runs it is the JMX bean `us.bringardner.parley:type=MailQueue,name=smtp`
+(`MailQueueMXBean`: the messages and their recipients, a message's content, flush, retry, delete).
 
 ### Protocol support
 
@@ -97,6 +106,7 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 
 - **Safe before 250:** accepted mail is written to `<root>/.smtp-queue` (an `.eml` and an `.env` file per message) before the server replies 250. It survives a restart.
 - **Local delivery** goes into the user's INBOX, the same maildrop POP3 and IMAP use. It adds `Return-Path` and `Delivered-To`. IMAP sessions in the same process see the new message at once.
+- **History:** the queue writes every event (queued, delivered, deferred, failed, expanded, completed, deleted) as a JSON line to `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl` (`QueueHistory`; `parley.mail.smtp.queue.historyDirectory`, `.historyDays`, default 30, and `.history=false` to turn it off). The queue forgets a message once it is done; the history keeps what happened.
 - **Aliases:** `parley.mail.smtp.aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
 - **Several domains (virtual domains):** list them all in `parley.mail.smtp.domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` parameter, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
 - **Queue events and administration:** `MailQueue.addQueueListener` reports each message queued, each delivery attempt (DELIVERED, DEFERRED, FAILED, EXPANDED) and each message leaving the queue, so an application can keep a history. `getEntry`, `getContent`, `retry(id)`, `flush()` and `delete(id)` let an administrator look at and act on the messages waiting.
@@ -223,8 +233,9 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.mail.smtp.port` | 25 | Relay (MX) port (used by `main`); 0: no relay listener, and the queue runs with the submission servers |
-| `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / 0 | Submission ports started by `main` (0 = none); 465 uses implicit TLS |
+| `parley.mail.smtp.port` | 25 | Relay (MX) port (`smtp`); 0 turns it off, and the queue runs with the submission servers |
+| `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / off | Submission ports (`submission`, `submissions`; 0 = off); 465 uses implicit TLS |
+| `parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
 | `parley.mail.root` | `/pop3` | Maildrop root, shared with POP3 and IMAP; the queue is `.smtp-queue` inside it |
 | `parley.mail.smtp.hostname` | the local host name | Name in the greeting, Received headers and notifications |
 | `parley.mail.smtp.domains` | the host name | Local domains, comma-separated |
