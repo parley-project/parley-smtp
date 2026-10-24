@@ -2,6 +2,12 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed
+
+- **`SmtpServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
+  line (which wins) and `parley-smtp.properties` in Parley's administrator folder (`/etc/parley`, or the file the server's
+  `configFile` property names); it stops on SIGTERM; the relay and the submission servers start and stop together; a failed start exits with 1.
+
 ### Changed (needs a configuration change)
 
 - **Property names** (Parley 2.0.0; the old names are no longer read): `JSmtp.*` is `parley.mail.smtp.*`

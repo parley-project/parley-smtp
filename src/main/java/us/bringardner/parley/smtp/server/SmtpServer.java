@@ -115,28 +115,28 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 * parley.mail.submission and parley.mail.submissions.
 	 */
 	public static void main(String[] args) throws Exception {
-		ServerMain.configure("SmtpServer", args, CONFIG_PROP);
-		boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
-		int port = Integer.getInteger((secure ? SMTPS_PREFIX : SMTP_PREFIX) + ".port", SMTP_PORT);
-		SmtpServer relay = new SmtpServer(port, SMTP_NAME, secure);
-		relay.start();
-		System.out.println("SmtpServer started on port " + port);
-		int sub = Integer.getInteger(SUBMISSION_PREFIX + ".port", SUBMISSION_PORT);
-		if (sub > 0) {
-			SmtpServer s = new SmtpServer(sub, SMTP_NAME, false);
-			s.setSubmission(true);
-			s.setQueue(relay.getQueue());
-			s.start();
-			System.out.println("Submission server started on port " + sub);
-		}
-		int subs = Integer.getInteger(SUBMISSIONS_PREFIX + ".port", 0);
-		if (subs > 0) {
-			SmtpServer s = new SmtpServer(subs, SMTP_NAME, true);
-			s.setSubmission(true);
-			s.setQueue(relay.getQueue());
-			s.start();
-			System.out.println("Submission server (implicit TLS) started on port " + subs);
-		}
+		ServerMain.run("SmtpServer", args, CONFIG_PROP, "parley-smtp.properties", () -> {
+			java.util.List<ServerMain.Service> servers = new java.util.ArrayList<ServerMain.Service>();
+			boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
+			int port = Integer.getInteger((secure ? SMTPS_PREFIX : SMTP_PREFIX) + ".port", SMTP_PORT);
+			SmtpServer relay = new SmtpServer(port, SMTP_NAME, secure);
+			servers.add(ServerMain.service(relay, "SmtpServer"));
+			int sub = Integer.getInteger(SUBMISSION_PREFIX + ".port", SUBMISSION_PORT);
+			if (sub > 0) {
+				SmtpServer s = new SmtpServer(sub, SMTP_NAME, false);
+				s.setSubmission(true);
+				s.setQueue(relay.getQueue());
+				servers.add(ServerMain.service(s, "Submission server"));
+			}
+			int subs = Integer.getInteger(SUBMISSIONS_PREFIX + ".port", 0);
+			if (subs > 0) {
+				SmtpServer s = new SmtpServer(subs, SMTP_NAME, true);
+				s.setSubmission(true);
+				s.setQueue(relay.getQueue());
+				servers.add(ServerMain.service(s, "Submission server (implicit TLS)"));
+			}
+			return servers;
+		});
 	}
 
 	private void initMe() {
