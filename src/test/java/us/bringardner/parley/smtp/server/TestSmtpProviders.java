@@ -151,6 +151,16 @@ public class TestSmtpProviders {
 		assertTrue(text.contains("\"type\":\"QUEUED\"") && text.contains("\"recipient\":\"tony@localhost\""), text);
 		assertTrue(text.contains("\"type\":\"DELIVERED\""), text);
 
+		// the open connections, through the queue-sharing wrapper
+		try (Socket open = new Socket("127.0.0.1", submission)) {
+			new BufferedReader(new InputStreamReader(open.getInputStream(), StandardCharsets.US_ASCII)).readLine(); // the greeting
+			us.bringardner.parley.net.server.ParleyConnection[] list = launcher.getServer("submission").getConnectionList();
+			assertEquals(1, list.length);
+			assertTrue(list[0].getRemote().startsWith("127.0.0.1:"), list[0].getRemote());
+			assertEquals(null, list[0].getUser(), "not logged in");
+			assertFalse(list[0].isSecure());
+		}
+
 		// restarting one SMTP server keeps the queue; stopping both lets it go
 		java.lang.Object before = shared.getQueue();
 		launcher.restart("submission");

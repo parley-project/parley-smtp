@@ -8,6 +8,7 @@
   other servers in one process (parley-net's `ServerMain`), and is managed with JMX. The SMTP servers of a process share
   one queue (made when the first starts, let go when the last stops), which is the JMX bean
   `us.bringardner.parley:type=MailQueue,name=smtp` (`MailQueueMXBean`, `QueuedMessageInfo`, `QueuedRecipientInfo`).
+  Each SMTP server's JMX bean lists its open connections (parley-net's `ParleyServerMBean.getConnectionList()`).
 - **The queue's history** (`QueueHistory`): every `QueueEvent` as a JSON line in `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl`,
   30 days kept (`parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays`). `SmtpServer.getQueueHistory()`.
 
