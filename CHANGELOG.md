@@ -7,6 +7,8 @@
 - **`SmtpServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
   line (which wins) and `parley-smtp.properties` in Parley's administrator folder (`/etc/parley`, or the file the server's
   `configFile` property names); it stops on SIGTERM; the relay and the submission servers start and stop together; a failed start exits with 1.
+  With `parley.mail.smtp.port=0` it runs only the submission servers (the queue runs with them) instead of
+  listening on a random port; with every SMTP port 0 it refuses to start.
 
 ### Changed (needs a configuration change)
 
