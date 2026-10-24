@@ -136,6 +136,11 @@ public final class SmtpProviders {
 			public int connections() {
 				return s.connections();
 			}
+
+			@Override
+			public java.util.List<us.bringardner.parley.net.server.ParleyConnection> connectionList() {
+				return s.connectionList();
+			}
 		};
 	}
 
