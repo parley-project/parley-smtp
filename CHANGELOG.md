@@ -34,6 +34,11 @@
   domain. Aliases are looked up before users, and the full address before the local part (`+detail` ignored as
   before) (`LocalDelivery.find(MailAddress)`, used by RCPT and local delivery).
 
+### Fixed
+
+- `SmtpStreams.CrlfOutputStream.write(byte[], int, int)` writes the bytes between line ends as one
+  block instead of a byte at a time (the output is the same).
+
 ## parley-smtp 1.1.0 (unreleased)
 
 ### Added

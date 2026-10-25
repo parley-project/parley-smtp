@@ -40,8 +40,23 @@ public final class SmtpStreams {
 
 		@Override
 		public void write(byte[] b, int off, int len) throws IOException {
-			for (int i = off; i < off + len; i++) {
-				write(b[i]);
+			java.util.Objects.checkFromIndexSize(off, len, b.length);
+			int end = off + len;
+			int i = off;
+			while (i < end) {
+				// a run up to the next CR or LF goes out as it is
+				int j = i;
+				if (!pendingCr) {
+					while (j < end && b[j] != '\r' && b[j] != '\n') {
+						j++;
+					}
+				}
+				if (j > i) {
+					out.write(b, i, j - i);
+					i = j;
+				} else {
+					write(b[i++]);
+				}
 			}
 		}
 
