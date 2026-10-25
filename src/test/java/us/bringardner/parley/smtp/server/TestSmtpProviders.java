@@ -173,6 +173,43 @@ public class TestSmtpProviders {
 		assertTrue(mbs.isRegistered(name), "a new queue when an SMTP server starts again");
 	}
 
+	/** AUTH PLAIN on a server; the reply's code */
+	private static String auth(int port, String user, String password) throws Exception {
+		try (Socket s = new Socket("127.0.0.1", port)) {
+			s.setSoTimeout(20000);
+			BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII));
+			OutputStream out = s.getOutputStream();
+			assertTrue(reply(in).startsWith("220"));
+			out.write("EHLO client.example\r\n".getBytes(StandardCharsets.US_ASCII));
+			assertTrue(reply(in).startsWith("250"));
+			String token = java.util.Base64.getEncoder().encodeToString(("\0" + user + "\0" + password).getBytes(StandardCharsets.UTF_8));
+			out.write(("AUTH PLAIN " + token + "\r\n").getBytes(StandardCharsets.US_ASCII));
+			String r = reply(in);
+			return r.substring(0, 3);
+		}
+	}
+
+	@Test
+	public void aSubmissionServerWithItsOwnUsersKeepsThem() throws Exception {
+		int smtp = freePort();
+		int submission = freePort();
+		write("users.txt", "tony , secret , READ|WRITE");
+		write("own.txt", "jose , other , READ|WRITE");
+		write("parley-mail.properties", "parley.mail.root=" + new File(dir, "mail").getPath(), "parley.mail.users=" + new File(dir, "users.txt").getPath());
+		write("parley-smtp.properties", "parley.mail.smtp.port=" + smtp, "parley.mail.submission.port=" + submission,
+				"parley.mail.smtp.hostname=localhost", "parley.mail.smtp.domains=localhost",
+				"parley.mail.submission.authenticationProvider=us.bringardner.parley.net.server.FileBasedAcl",
+				"parley.mail.submission.userFile=" + new File(dir, "own.txt").getPath());
+		ServerContext context = new ServerContext(javax.management.MBeanServerFactory.newMBeanServer());
+		launcher = new ServerLauncher("SmtpUsersTest", new LaunchSettings(new Properties()), Arrays.asList("smtp", "submission"), dir, context);
+		launcher.init();
+		launcher.startAll();
+		assertEquals("235", auth(submission, "jose", "other"), "its own users");
+		assertEquals("535", auth(submission, "tony", "secret"), "not the shared users");
+		assertEquals("235", auth(smtp, "tony", "secret"), "the relay has the shared users");
+		assertNotNull(us.bringardner.parley.mail.server.AbstractMailServer.sharedUsers(context, new File(dir, "users.txt")));
+	}
+
 	@Test
 	public void legacySecureRelay() {
 		System.setProperty("parley.mail.smtp.secure", "true");

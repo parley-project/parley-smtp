@@ -340,9 +340,12 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	@Override
 	protected synchronized void releasingStore() {
 		if (queueStarted) {
-			getDeliveryConfig().getDmarc().getReporter().stop();
 			queue.stop();
 			queueStarted = false;
+			if (!queue.isRunning()) {
+				// the last server using the queue (a shared queue's other servers still need the reporter)
+				getDeliveryConfig().getDmarc().getReporter().stop();
+			}
 		}
 	}
 
@@ -361,9 +364,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				deliveryConfig.setAccessControl(getAccessControl());
 				FileSource root = getMaildropRoot();
 				queue = new MailQueue(root.getChild(QUEUE_DIRECTORY), deliveryConfig);
-				QueueHistory history = QueueHistory.fromSettings(
-						us.bringardner.parley.files.fileproxy.FileProxyFactory.FACTORY_ID.equals(root.getFileSourceFactory().getTypeId())
-								? root.getAbsolutePath() : null);
+				QueueHistory history = QueueHistory.fromSettings(root);
 				if (history != null) {
 					queue.addQueueListener(history);
 					queueHistory = history;

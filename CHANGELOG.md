@@ -11,6 +11,9 @@
   Each SMTP server's JMX bean lists its open connections (parley-net's `ParleyServerMBean.getConnectionList()`).
 - **The queue's history** (`QueueHistory`): every `QueueEvent` as a JSON line in `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl`,
   30 days kept (`parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays`). `SmtpServer.getQueueHistory()`.
+  Written through the mail root's FileSource (any store), a line at a time with the file closed again, so
+  processes sharing a queue write the same files.
+- The DMARC reporter of a queue SMTP servers share stops with the last of them, not the first.
 
 ### Changed
 

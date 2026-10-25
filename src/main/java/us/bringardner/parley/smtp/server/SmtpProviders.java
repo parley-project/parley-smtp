@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.management.JMException;
 import javax.management.ObjectName;
 
+import us.bringardner.parley.mail.server.AbstractMailServer;
 import us.bringardner.parley.mail.server.MailServerProvider;
 import us.bringardner.parley.net.server.ServerContext;
 import us.bringardner.parley.net.server.ServerMain;
@@ -50,7 +51,14 @@ public final class SmtpProviders {
 
 		synchronized MailQueue acquire() {
 			if (owner == null) {
-				SmtpServer o = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
+				SmtpServer o;
+				try {
+					o = AbstractMailServer.makeIn(context, () -> new SmtpServer(0, SmtpServer.SMTP_NAME, false));
+				} catch (RuntimeException e) {
+					throw e;
+				} catch (Exception e) {
+					throw new IllegalStateException(e.getMessage(), e);
+				}
 				MailQueue q = o.getQueue();
 				try {
 					bean = context.register("MailQueue", "smtp", new MailQueueBean(q, o.getQueueHistory()));
@@ -162,7 +170,8 @@ public final class SmtpProviders {
 
 		@Override
 		public ServerMain.Service create(ServerContext context) throws Exception {
-			return service(new SmtpServer(port(), SmtpServer.SMTP_NAME, legacySecure()), "SMTP server", sharedQueue(context));
+			return service(AbstractMailServer.makeIn(context, () -> new SmtpServer(port(), SmtpServer.SMTP_NAME, legacySecure())), "SMTP server",
+					sharedQueue(context));
 		}
 	}
 
@@ -179,8 +188,11 @@ public final class SmtpProviders {
 
 		@Override
 		public ServerMain.Service create(ServerContext context) throws Exception {
-			SmtpServer s = new SmtpServer(port(), SmtpServer.SMTP_NAME, false);
-			s.setSubmission(true);
+			SmtpServer s = AbstractMailServer.makeIn(context, () -> {
+				SmtpServer made = new SmtpServer(port(), SmtpServer.SMTP_NAME, false);
+				made.setSubmission(true);
+				return made;
+			});
 			return service(s, "Submission server", sharedQueue(context));
 		}
 	}
@@ -201,8 +213,11 @@ public final class SmtpProviders {
 
 		@Override
 		public ServerMain.Service create(ServerContext context) throws Exception {
-			SmtpServer s = new SmtpServer(port(), SmtpServer.SMTP_NAME, true);
-			s.setSubmission(true);
+			SmtpServer s = AbstractMailServer.makeIn(context, () -> {
+				SmtpServer made = new SmtpServer(port(), SmtpServer.SMTP_NAME, true);
+				made.setSubmission(true);
+				return made;
+			});
 			return service(s, "Submission server (implicit TLS)", sharedQueue(context));
 		}
 	}
