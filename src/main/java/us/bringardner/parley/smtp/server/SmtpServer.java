@@ -31,6 +31,7 @@ import us.bringardner.parley.smtp.queue.ParleyDnsMxResolver;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.queue.MailQueue;
 import us.bringardner.parley.smtp.queue.QueueEntry;
+import us.bringardner.parley.smtp.queue.QueueHistory;
 
 /**
  * An SMTP server (RFC 5321, following draft-ietf-emailcore-rfc5321bis) and mail
@@ -83,6 +84,8 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private final DeliveryConfig deliveryConfig = new DeliveryConfig();
 	private MailQueue queue;
 	private boolean ownsQueue;
+	/** the history of the queue this server made, or null */
+	private QueueHistory queueHistory;
 	private boolean queueStarted;
 
 	public SmtpServer(int port, String name, boolean secure) {
@@ -108,42 +111,15 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/**
-	 * Starts the relay server (parley.mail.smtp.port, default 25) and, unless
-	 * parley.mail.submission.port (default 587) is 0, and if parley.mail.submissions.port
-	 * (implicit TLS, default 0) is set, submission servers sharing its queue. Each server reads
-	 * its own settings (key store, limits, access control) with its prefix: parley.mail.smtp,
-	 * parley.mail.submission and parley.mail.submissions.
+	 * Run the relay (parley.mail.smtp.port, default 25; 0 turns it off), submission
+	 * (parley.mail.submission.port, default 587; 0 turns it off) and, when
+	 * parley.mail.submissions.port is set, submission with implicit TLS, sharing one queue, until the
+	 * process is stopped; see {@link SmtpProviders} and parley-net's ServerMain.launch. Each server
+	 * reads its own settings (key store, limits, access control) with its prefix:
+	 * parley.mail.smtp, parley.mail.submission and parley.mail.submissions.
 	 */
 	public static void main(String[] args) throws Exception {
-		ServerMain.run("SmtpServer", args, CONFIG_PROP, "parley-smtp.properties", () -> {
-			java.util.List<ServerMain.Service> servers = new java.util.ArrayList<ServerMain.Service>();
-			boolean secure = Boolean.parseBoolean(System.getProperty(P + "secure", "false"));
-			int port = Integer.getInteger((secure ? SMTPS_PREFIX : SMTP_PREFIX) + ".port", SMTP_PORT);
-			// the relay (MX) owns the queue the submission servers share; with its port 0 it doesn't listen,
-			// and the queue runs with the submission servers
-			SmtpServer relay = new SmtpServer(Math.max(port, 0), SMTP_NAME, secure);
-			if (port > 0) {
-				servers.add(ServerMain.service(relay, "SmtpServer"));
-			}
-			int sub = Integer.getInteger(SUBMISSION_PREFIX + ".port", SUBMISSION_PORT);
-			if (sub > 0) {
-				SmtpServer s = new SmtpServer(sub, SMTP_NAME, false);
-				s.setSubmission(true);
-				s.setQueue(relay.getQueue());
-				servers.add(ServerMain.service(s, "Submission server"));
-			}
-			int subs = Integer.getInteger(SUBMISSIONS_PREFIX + ".port", 0);
-			if (subs > 0) {
-				SmtpServer s = new SmtpServer(subs, SMTP_NAME, true);
-				s.setSubmission(true);
-				s.setQueue(relay.getQueue());
-				servers.add(ServerMain.service(s, "Submission server (implicit TLS)"));
-			}
-			if (servers.isEmpty()) {
-				throw new IllegalStateException("Every SMTP port is 0: nothing to run");
-			}
-			return servers;
-		});
+		ServerMain.launch("SmtpServer", args, "smtp", "submission", "submissions");
 	}
 
 	private void initMe() {
@@ -364,9 +340,12 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	@Override
 	protected synchronized void releasingStore() {
 		if (queueStarted) {
-			getDeliveryConfig().getDmarc().getReporter().stop();
 			queue.stop();
 			queueStarted = false;
+			if (!queue.isRunning()) {
+				// the last server using the queue (a shared queue's other servers still need the reporter)
+				getDeliveryConfig().getDmarc().getReporter().stop();
+			}
 		}
 	}
 
@@ -383,13 +362,27 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			try {
 				deliveryConfig.setMaildropRoot(getMaildropRoot());
 				deliveryConfig.setAccessControl(getAccessControl());
-				queue = new MailQueue(getMaildropRoot().getChild(QUEUE_DIRECTORY), deliveryConfig);
+				FileSource root = getMaildropRoot();
+				queue = new MailQueue(root.getChild(QUEUE_DIRECTORY), deliveryConfig);
+				QueueHistory history = QueueHistory.fromSettings(root);
+				if (history != null) {
+					queue.addQueueListener(history);
+					queueHistory = history;
+				}
 			} catch (IOException e) {
 				throw new java.io.UncheckedIOException(e);
 			}
 			ownsQueue = true;
 		}
 		return queue;
+	}
+
+	/**
+	 * The history of the queue this server made ({@link QueueHistory#HISTORY_PROP}), or null (none,
+	 * or the queue is another server's)
+	 */
+	public synchronized QueueHistory getQueueHistory() {
+		return ownsQueue ? queueHistory : null;
 	}
 
 	/** Share another server's queue (e.g. a submission server with the relay server). */
