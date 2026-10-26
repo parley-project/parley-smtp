@@ -47,7 +47,7 @@ import us.bringardner.parley.core.NamedThreadFactory;
  * retrying temporary failures on a schedule, and returning delivery status
  * notifications (RFC 3464) to the sender when asked or when delivery fails.
  * <p>
- * Servers may share the queue directory (see {@code parley.mail.sharedStore} in
+ * Servers may share the queue directory (see the store's {@code sharing} setting in
  * {@link MailLocks}): when the directory is under a maildrop root with a lock domain, each
  * delivery pass holds the entry's lock {@code queue/<dir>/<id>} (an entry another server is
  * working on is skipped, not waited for) and starts from the envelope on disk, so a message is

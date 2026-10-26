@@ -2,12 +2,31 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-10-26: each server alone, shared assets carry their own settings)
+
+- **Each SMTP server reads only its own settings, under its own prefix**, and the queue carries its own:
+  - A server's settings are about its port: `hostname` (required; no default from the machine's name),
+    `requireTls`, `relayNetworks`, the limits, the checks of incoming mail and its queue, `<prefix>.queue`
+    (default `.smtp-queue` under the maildrop root). A submission server reads `parley.mail.submission.*` from
+    the start (it used to read the relay's settings).
+  - Whether a server is a relay or a submission server comes from how it is made
+    (`new SmtpServer(port, name, secure, submission)`); the setting `parley.mail.smtp.submission` is gone.
+  - The queue's settings are in `queue.properties` in its directory, without a prefix: `hostname` and `domains`
+    (required), the smart host (`relayPassword` must name where the password is kept, `@keychain:...`,
+    `@file:...` or `@env:...`), the resolver, DKIM signing, ARC sealing, DMARC reports, workers, retry and the
+    history. They replace `parley.mail.smtp.domains`, `.relayHost`, `.queue.workers`, `.dkim.keys` ... and
+    `parley.mail.smtp.queue.history*`. A queue without them isn't used.
+  - Each server opens its own queue; servers given the same queue share it through the store's locks, as servers
+    in separate processes would. The JVM-wide shared queue (`SmtpProviders.SharedQueue`) is gone, and each
+    server's queue is the JMX bean `MailQueue,name=<its id>`.
+  - No setting is derived from another: the domains aren't the host name, DMARC reports need
+    `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
+
 ### Added
 
 - **`SmtpProviders`**: parley-net `ServerProvider`s `smtp`, `submission` and `submissions`, so SMTP runs alone or with
-  other servers in one process (parley-net's `ServerMain`), and is managed with JMX. The SMTP servers of a process share
-  one queue (made when the first starts, let go when the last stops), which is the JMX bean
-  `us.bringardner.parley:type=MailQueue,name=smtp` (`MailQueueMXBean`, `QueuedMessageInfo`, `QueuedRecipientInfo`).
+  other servers in one process (parley-net's `ServerMain`), and is managed with JMX. Each server's queue is the JMX bean
+  `us.bringardner.parley:type=MailQueue,name=<id>` (`MailQueueMXBean`, `QueuedMessageInfo`, `QueuedRecipientInfo`).
   Each SMTP server's JMX bean lists its open connections (parley-net's `ParleyServerMBean.getConnectionList()`).
 - **The queue's history** (`QueueHistory`): every `QueueEvent` as a JSON line in `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl`,
   30 days kept (`parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays`). `SmtpServer.getQueueHistory()`.
