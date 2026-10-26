@@ -45,28 +45,48 @@ Tests run with a 64 MB heap, so message bodies must stay out of memory.
 Behind the sessions is `MailQueue` (package `us.bringardner.parley.smtp.queue`). It delivers mail locally, relays it to other servers and sends delivery status notifications.
 
 ```java
+// once, by an administrator: the store's and the queue's own settings
+MailLocks.writeStoreSettings(rootFileSource, Sharing.HOST);   // two servers use the store
+Properties q = new Properties();
+q.setProperty("hostname", "mx.example.com");
+q.setProperty("domains", "example.com");
+MailQueue.writeSettings(rootFileSource.getChild(SmtpServer.QUEUE_DIRECTORY), q);
+
 SmtpServer relay = new SmtpServer();               // port 25
 relay.setMaildropRoot(rootFileSource);             // the same root as POP3 and IMAP
-relay.addLocalDomain("example.com");
+relay.setHostname("mx.example.com");
 relay.start();
 
 SmtpServer submission = SmtpServer.submissionServer(false);   // port 587
-submission.setQueue(relay.getQueue());             // one queue for both
+submission.setMaildropRoot(rootFileSource);        // the same queue: .smtp-queue under the root
+submission.setHostname("mx.example.com");
 submission.start();
 
 relay.send(from, List.of(to), message);            // send mail from code
 ```
 
-Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.smtp.domains=example.com -Dparley.mail.root=/var/mail/pop3`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587 (and 465 when `parley.mail.submissions.port` is set), sharing one queue.
+Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.root=/var/mail -Dparley.mail.smtp.hostname=mx.example.com -Dparley.mail.submission.hostname=mx.example.com`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587 (and 465 when `parley.mail.submissions.port` is set), each using the queue its settings name (by default the same one, `.smtp-queue` under the root).
 
 `main` runs the providers `smtp`, `submission` and `submissions` (`SmtpProviders`) with parley-net's
 `ServerMain.launch`: settings from `parley-mail.properties` then `parley-smtp.properties` in the settings
 folder, the JVM's `-D` options and the command line; a port of 0 turns that server off. To run SMTP with
-other servers in one process, list the ids in parley-net's launcher (see parley-mail's README). The SMTP
-servers of a process share one queue, made when the first of them starts and let go when the last one
-stops (restart every SMTP server to apply changed delivery settings such as `parley.mail.smtp.domains`).
-While it runs it is the JMX bean `us.bringardner.parley:type=MailQueue,name=smtp`
-(`MailQueueMXBean`: the messages and their recipients, a message's content, flush, retry, delete).
+other servers in one process, list the ids in parley-net's launcher (see parley-mail's README).
+
+Each server is written as if it were the only one: it reads only its own configuration, and nothing
+changes when it shares a process with other servers. A server opens the queue its settings name;
+servers given the same queue share it through the store's locks, exactly as servers in separate
+processes would (so the store's settings must say `sharing=host` or `cluster`). While a server runs,
+its queue is the JMX bean `us.bringardner.parley:type=MailQueue,name=<id>` (`smtp`, `submission`,
+`submissions`; `MailQueueMXBean`: the messages and their recipients, a message's content, flush,
+retry, delete). Restart a server to make it read the queue's settings again.
+
+**The queue carries its own settings**: `queue.properties` in the queue's directory (see
+"Queue settings" below), read by every server that uses the queue, so they can't disagree about
+how its mail is delivered. A queue without it isn't used and the server doesn't start: making it is
+an administrator's job (`MailQueue.writeSettings`). A secret it needs is never written in it: the
+smart host's `relayPassword` names where the password is kept (`@keychain:parley/smarthost`, from
+parley-credentials-keychain; `@file:/etc/parley/smarthost.secret` on a server without a desktop
+keychain; or `@env:NAME`).
 
 ### Protocol support
 
@@ -97,7 +117,7 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 
 ### Who can send what
 
-- **Mail for the local domains** (`parley.mail.smtp.domains`) is accepted from anyone, but only for existing users, aliases and `postmaster`. Unknown users get `550 5.1.1`. A `+detail` suffix is ignored when looking up the user.
+- **Mail for the local domains** (`domains`) is accepted from anyone, but only for existing users, aliases and `postmaster`. Unknown users get `550 5.1.1`. A `+detail` suffix is ignored when looking up the user.
 - **Mail for other domains** is accepted only from authenticated users (who need the WRITE permission) or from `parley.mail.smtp.relayNetworks`. Everyone else gets `550 5.7.1 Relay access denied`, so the server is not an open relay.
 - **Submission servers** (port 587/465) require AUTH and add `Date` and `Message-ID` when they're missing.
 - **requireTls:** with `parley.mail.smtp.requireTls`, AUTH is offered only after STARTTLS. It is off by default, as for POP3 and IMAP; turn it on for submission on a public network.
@@ -106,24 +126,24 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 
 - **Safe before 250:** accepted mail is written to `<root>/.smtp-queue` (an `.eml` and an `.env` file per message) before the server replies 250. It survives a restart.
 - **Local delivery** goes into the user's INBOX, the same maildrop POP3 and IMAP use. It adds `Return-Path` and `Delivered-To`. IMAP sessions in the same process see the new message at once.
-- **History:** the queue writes every event (queued, delivered, deferred, failed, expanded, completed, deleted) as a JSON line to `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl` (`QueueHistory`; `parley.mail.smtp.queue.historyDirectory`, `.historyDays`, default 30, and `.history=false` to turn it off). The folder is on the mail root's file system (any FileSource), and each line is appended and the file closed again, so servers in several processes sharing a queue write the same files. The queue forgets a message once it is done; the history keeps what happened.
-- **Aliases:** `parley.mail.smtp.aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
-- **Several domains (virtual domains):** list them all in `parley.mail.smtp.domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` parameter, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
+- **History:** the queue writes every event (queued, delivered, deferred, failed, expanded, completed, deleted) as a JSON line to `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl` (`QueueHistory`; the queue settings `historyDirectory`, `historyDays`, default 30, and `history=false` to turn it off). The folder is on the mail root's file system (any FileSource), and each line is appended and the file closed again, so servers in several processes sharing a queue write the same files. The queue forgets a message once it is done; the history keeps what happened.
+- **Aliases:** `aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
+- **Several domains (virtual domains):** list them all in `domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` parameter, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
 - **Queue events and administration:** `MailQueue.addQueueListener` reports each message queued, each delivery attempt (DELIVERED, DEFERRED, FAILED, EXPANDED) and each message leaving the queue, so an application can keep a history. `getEntry`, `getContent`, `retry(id)`, `flush()` and `delete(id)` let an administrator look at and act on the messages waiting.
 - **Remote delivery:**
   - The queue looks up MX records. With no MX record it uses the domain's own address, and a null MX means the domain takes no mail.
-  - Two resolvers are included, chosen with `parley.mail.smtp.resolver`:
+  - Two resolvers are included, chosen with `resolver`:
     - `jdk` (default): `DnsMxResolver`, the JDK's DNS provider.
-    - `parley-dns`: `ParleyDnsMxResolver`, which makes every DNS request with parley-dns: the MX query and the A/AAAA lookups of the mail hosts. It asks the servers in `parley.mail.smtp.dnsServers` (comma-separated), or those in `/etc/resolv.conf`, in turn.
+    - `parley-dns`: `ParleyDnsMxResolver`, which makes every DNS request with parley-dns: the MX query and the A/AAAA lookups of the mail hosts. It asks the servers in `dnsServers` (comma-separated), or those in `/etc/resolv.conf`, in turn.
     - `parley-dns-iterative`: parley-dns's own iterative resolver, which starts from the root servers in its `sbelt.prop`.
     - Any other `MxResolver` can be set with `getDeliveryConfig().setResolver(...)`.
   - It tries hosts in order of preference, with opportunistic STARTTLS.
   - It uses SIZE, 8BITMIME, SMTPUTF8, CHUNKING/BINARYMIME and DSN when the message needs them. A message needing SMTPUTF8 is returned (5.6.7) by a server without it, as RFC 6531 requires.
-- **Smart host:** set `parley.mail.smtp.relayHost=host:port` (with `parley.mail.smtp.relayUser`/`parley.mail.smtp.relayPassword`) to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`parley.mail.smtp.relayTls`).
-- **Retries:** temporary failures are retried on `parley.mail.smtp.queue.retry` (minutes, default `1,5,15,30,60,120`).
-  - The sender gets a "delayed" notice after `parley.mail.smtp.queue.delayWarningHours` (default 4).
-  - The message is returned after `parley.mail.smtp.queue.maxAgeHours` (default 120).
-- **Several servers on one queue:** set `parley.mail.sharedStore` (`off`, the default, `host` or `cluster`; see parley-mail) when servers share the maildrop root, and with it `.smtp-queue`.
+- **Smart host:** set the queue settings `relayHost=host:port` (with `relayUser`/`relayPassword`) to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`relayTls`).
+- **Retries:** temporary failures are retried on `retry` (minutes, default `1,5,15,30,60,120`).
+  - The sender gets a "delayed" notice after `delayWarningHours` (default 4).
+  - The message is returned after `maxAgeHours` (default 120).
+- **Several servers on one queue:** give them the same queue (the default) on a store whose settings say `sharing=host` or `cluster` (see parley-mail): in one process or several, they share it the same way.
   - Each delivery pass holds the message's lock in the store's lock domain (`queue/.smtp-queue/<id>`). A message another server is working on is skipped, not waited for.
   - A pass starts from the envelope as it is on disk, so no server repeats a delivery another made or overwrites its progress. A message another server finished is dropped.
   - A shared queue looks at the directory every few seconds for messages the other servers accepted.
@@ -150,7 +170,7 @@ To set up a key:
 java -cp parley-smtp.jar:... us.bringardner.parley.smtp.dkim.DkimKeys rsa /etc/dkim/example.com.pem
 ```
 
-This writes the private key (PKCS#8 PEM) and prints the TXT record to publish at `<selector>._domainkey.example.com`, for example `mail2026._domainkey.example.com`. Then set `parley.mail.smtp.dkim.keys=example.com:mail2026:/etc/dkim/example.com.pem`, with more keys separated by commas. Keys from openssl work too (`-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----`), but not encrypted ones. In code:
+This writes the private key (PKCS#8 PEM) and prints the TXT record to publish at `<selector>._domainkey.example.com`, for example `mail2026._domainkey.example.com`. Then set `dkim.keys=example.com:mail2026:/etc/dkim/example.com.pem`, with more keys separated by commas. Keys from openssl work too (`-----BEGIN PRIVATE KEY-----` or `-----BEGIN RSA PRIVATE KEY-----`), but not encrypted ones. In code:
 
 ```java
 relay.getDkim().addSigner(new DkimSigner("example.com", "mail2026", DkimKeys.privateKey(new File("/etc/dkim/example.com.pem"))));
@@ -167,7 +187,7 @@ Authentication-Results: mx.example.com;
 - The message is accepted whatever the result. Rejecting is a policy decision, for DMARC to make.
 - Authentication-Results fields that claim to come from this server (`parley.mail.smtp.hostname`) are removed first (RFC 8601 section 5).
 - The body is hashed as it streams from the queue file, so large messages are never held in memory.
-- Keys are looked up with the `parley-dns` resolver's DNS servers when `parley.mail.smtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise the servers in `/etc/resolv.conf` are asked through parley-dns. Turn verification off with `parley.mail.smtp.dkim.verify=false`.
+- Keys are looked up with the `parley-dns` resolver's DNS servers when `resolver=parley-dns` (or `parley-dns-iterative`). Otherwise the servers in `/etc/resolv.conf` are asked through parley-dns. Turn verification off with `parley.mail.smtp.dkim.verify=false`.
 
 ### SPF (RFC 7208)
 
@@ -186,7 +206,7 @@ For mail from other servers (clients that are neither authenticated nor in `parl
 - **Results:** `pass`, `fail`, `softfail`, `neutral`, `none`, `temperror` (DNS failed) or `permerror` (a broken record, or too many lookups).
 - **Rejecting:** by default the message is accepted whatever the result, so DMARC or a filter can decide. With `parley.mail.smtp.spf.rejectFail=true`, a `fail` is refused at MAIL FROM with `550 5.7.23 SPF validation failed:` followed by the domain's explanation (its `exp=` text).
 - **Forged headers:** Received-SPF and Authentication-Results fields that claim to come from this server are removed.
-- **DNS:** queries use the `parley-dns` resolver's DNS servers when `parley.mail.smtp.resolver=parley-dns` (or `parley-dns-iterative`). Otherwise they go to the servers in `/etc/resolv.conf` through parley-dns.
+- **DNS:** queries use the `parley-dns` resolver's DNS servers when `resolver=parley-dns` (or `parley-dns-iterative`). Otherwise they go to the servers in `/etc/resolv.conf` through parley-dns.
 - **Turning it off:** set `parley.mail.smtp.spf.check=false`.
 
 ### DMARC (RFC 7489)
@@ -205,68 +225,88 @@ For mail from other servers, the server combines the SPF and DKIM results with t
 
 Domains ask for reports with `rua=` (aggregate) and `ruf=` (failure) in their DMARC record. Both kinds are off by default.
 
-- **Aggregate reports** (`parley.mail.smtp.dmarc.aggregateReports=true`, RFC 7489 section 7.2):
+- **Aggregate reports** (`dmarc.aggregateReports=true`, RFC 7489 section 7.2):
   - Each evaluation is stored in `.dmarc-reports` under the maildrop root, so it survives restarts.
-  - Every `parley.mail.smtp.dmarc.reportIntervalHours` (default 24), each domain gets one XML report.
+  - Every `dmarc.reportIntervalHours` (default 24), each domain gets one XML report.
   - Identical messages share a row, with a count. The `disposition` is what was actually done; a fail that wasn't enforced is marked `local_policy`, and a pct= downgrade `sampled_out`.
   - The XML is gzipped and mailed as `<org>!<domain>!<begin>!<end>.xml.gz`, with the subject `Report Domain: <domain> Submitter: <org> Report-ID: <id>`.
-- **Failure reports** (`parley.mail.smtp.dmarc.failureReports=true`, section 7.3):
+- **Failure reports** (`dmarc.failureReports=true`, section 7.3):
   - Sent at once in the Abuse Reporting Format (RFC 6591): a `message/feedback-report` part, plus the message's header (never its body).
   - Sent when the domain's `fo=` options call for one: `0` (default) when nothing passed aligned, `1` when either SPF or DKIM didn't pass aligned, `d` when a DKIM signature failed, `s` when SPF failed.
-  - At most `parley.mail.smtp.dmarc.maxFailureReportsPerHour` (default 10) per domain. Never sent about a message that is itself a report.
+  - At most `dmarc.maxFailureReportsPerHour` (default 10) per domain. Never sent about a message that is itself a report.
 - **Report addresses:** only `mailto:` URIs are supported, and their size limits (`!10m`) are honoured. An address outside the policy domain's organization is used only if its domain agrees to take the reports (a `v=DMARC1` TXT record at `<policy domain>._report._dmarc.<report domain>`, section 7.1).
-- **Several servers:** with `parley.mail.sharedStore` on, each server stores its evaluations in logs of its own, under the store's "logs" lock (held shared while storing, exclusive while a flush takes the logs). One server sends at a time (the "send" lock; a server that finds it taken leaves the work to the holder), and each domain still gets one report with every server's evaluations. `.last-sent` keeps the servers' timers to about one sending per interval between them. The failure-report rate limit is counted per server.
-- **Sending:** reports go out through the queue from `parley.mail.smtp.dmarc.reportEmail` (default `postmaster@<hostname>`). They are DKIM-signed if a key fits that domain. `parley.mail.smtp.dmarc.reportOrgName` (default the host name) names the reporter.
+- **Several servers:** on a shared store (`sharing=host` or `cluster`), each server stores its evaluations in logs of its own, under the store's "logs" lock (held shared while storing, exclusive while a flush takes the logs). One server sends at a time (the "send" lock; a server that finds it taken leaves the work to the holder), and each domain still gets one report with every server's evaluations. `.last-sent` keeps the servers' timers to about one sending per interval between them. The failure-report rate limit is counted per server.
+- **Sending:** reports go out through the queue from `dmarc.reportEmail`. They are DKIM-signed if a key fits that domain. `dmarc.reportOrgName` names the reporter. Both are queue settings, and required when reports are on (they aren't taken from the host name).
 
 ### ARC (RFC 8617)
 
 Forwarding (an alias with members at other servers, a mailing list) breaks SPF, and changes made along the way break DKIM, so forwarded mail can fail DMARC at the next server. ARC lets each server that handles a message record what it found, in a chain of sealed ARC sets the next server can check. The code is in `us.bringardner.parley.smtp.dkim` (`ArcVerifier`, `ArcSealer`, `Arc`).
 
 - **Validating:** for mail from other servers, the chain is checked: its structure, the newest ARC-Message-Signature and every ARC-Seal. The result goes in Authentication-Results, e.g. `arc=pass (as[2].d=lists.example.org as[1].d=example.com) smtp.remote-ip=192.0.2.1`; `arc=fail` comes with a `reason=`. Keys are found the same way as DKIM keys.
-- **Trusted sealers:** with `parley.mail.smtp.dmarc.enforce=true`, mail that fails DMARC is still delivered normally when its chain passes and the newest seal is from a domain in `parley.mail.smtp.arc.trustedSealers` (organizational domains compared), as in section 7.2. The DMARC aggregate report marks this as `local_policy` with a comment naming the seals and the first hop's IP address (section 7.2.2).
+- **Trusted sealers:** with `parley.mail.smtp.dmarc.enforce=true`, mail that fails DMARC is still delivered normally when its chain passes and the newest seal is from a domain in `arc.trustedSealers` (organizational domains compared), as in section 7.2. The DMARC aggregate report marks this as `local_policy` with a comment naming the seals and the first hop's IP address (section 7.2.2).
 - **Sealing:** when mail received from another server is forwarded to another server, an ARC set is added before it goes, once per message. The ARC-Authentication-Results copy our Authentication-Results, and the seal's `cv=` is our `arc=` result. Mail from our own users is DKIM-signed instead.
-- **Keys:** sets are sealed with the DKIM key (`parley.mail.smtp.dkim.keys`) of `parley.mail.smtp.arc.domain` (default the host name), or of its closest parent domain: a key for `example.com` seals for `mx.example.com`. ARC defines only `rsa-sha256`, so an Ed25519 key doesn't seal; with no RSA key that fits, nothing is sealed.
+- **Keys:** sets are sealed with the DKIM key (`dkim.keys`) of `arc.domain` (a queue setting; without one, nothing is sealed), or of its closest parent domain: a key for `example.com` seals for `mx.example.com`. ARC defines only `rsa-sha256`, so an Ed25519 key doesn't seal; with no RSA key that fits, nothing is sealed.
 - **Format:** tags are written in sorted order and long `b=` values in lines of 72 characters, like dkimpy, so the sets are byte-for-byte those of the reference implementation.
-- **Turning it off:** set `parley.mail.smtp.arc.verify=false` or `parley.mail.smtp.arc.seal=false`.
+- **Turning it off:** set the server's `parley.mail.smtp.arc.verify=false`, or the queue's `arc.seal=false`.
 
 ### Configuration
 
-| Property | Default | Meaning |
+Each server reads its own settings under its prefix: `parley.mail.smtp` (the relay), `parley.mail.smtps`
+(the relay with implicit TLS), `parley.mail.submission` and `parley.mail.submissions`. The table gives
+the relay's names; a submission server's are the same after its prefix (`parley.mail.submission.hostname`).
+There is no fallback from one prefix to another, and no setting is taken from another setting.
+
+| Server setting | Default | Meaning |
 |---|---|---|
-| `parley.mail.smtp.port` | 25 | Relay (MX) port (`smtp`); 0 turns it off, and the queue runs with the submission servers |
+| `parley.mail.smtp.port` | 25 | Relay (MX) port (`smtp`); 0 turns it off |
 | `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / off | Submission ports (`submission`, `submissions`; 0 = off); 465 uses implicit TLS |
-| `parley.mail.smtp.queue.history`, `.historyDirectory`, `.historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
-| `parley.mail.root` | `/pop3` | Maildrop root, shared with POP3 and IMAP; the queue is `.smtp-queue` inside it |
-| `parley.mail.smtp.hostname` | the local host name | Name in the greeting, Received headers and notifications |
-| `parley.mail.smtp.domains` | the host name | Local domains, comma-separated |
+| `parley.mail.root` | (required) | Maildrop root, shared with POP3 and IMAP; the store has its own settings (see parley-mail) |
+| `parley.mail.smtp.hostname` | (required) | Name in this server's greeting and Received headers |
+| `parley.mail.smtp.queue` | `.smtp-queue` | This server's queue: a directory under the maildrop root |
 | `parley.mail.smtp.relayNetworks` | none | Networks that may relay without AUTH, e.g. `127.0.0.1/32,10.0.0.0/8` |
 | `parley.mail.smtp.requireTls` | false | AUTH (and MAIL on submission ports) only after STARTTLS |
 | `parley.mail.smtp.maxMessageSize` | 52428800 | SIZE limit |
 | `parley.mail.smtp.maxRecipients` | 100 | Recipients per message |
 | `parley.mail.smtp.timeout` | 300000 ms | Idle session timeout (RFC 5321 requires at least 5 minutes) |
-| `parley.mail.smtp.aliases`, `parley.mail.smtp.postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
-| `parley.mail.smtp.relayHost`, `parley.mail.smtp.relayUser`, `parley.mail.smtp.relayPassword`, `parley.mail.smtp.relayTls` | none, none, none, `required` | Smart host |
-| `parley.mail.smtp.relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
-| `parley.mail.smtp.resolver`, `parley.mail.smtp.dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns` |
-| `parley.mail.smtp.preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
-| `parley.mail.smtp.tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |
-| `parley.mail.smtp.queue.workers`, `parley.mail.smtp.queue.retry`, `parley.mail.smtp.queue.delayWarningHours`, `parley.mail.smtp.queue.maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Queue settings |
-| `parley.mail.smtp.dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
-| `parley.mail.smtp.dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
+| `parley.mail.smtp.maxHops` | 100 | Received headers allowed before a message counts as a loop |
 | `parley.mail.smtp.dkim.verify` | true | Verify DKIM signatures of incoming mail and add Authentication-Results |
 | `parley.mail.smtp.spf.check` | true | Check SPF for incoming mail and add Received-SPF and Authentication-Results |
 | `parley.mail.smtp.spf.rejectFail` | false | Refuse MAIL FROM when the SPF result is `fail` (550 5.7.23) |
 | `parley.mail.smtp.dmarc.check` | true | Check DMARC for incoming mail and add the result to Authentication-Results |
 | `parley.mail.smtp.dmarc.enforce` | false | Act on the policy: refuse `p=reject` mail (550 5.7.1), deliver `p=quarantine` mail to Junk |
 | `parley.mail.smtp.dmarc.publicSuffixList` | the included copy | A newer `public_suffix_list.dat` for organizational domains |
-| `parley.mail.smtp.dmarc.aggregateReports`, `parley.mail.smtp.dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |
-| `parley.mail.smtp.dmarc.reportEmail`, `parley.mail.smtp.dmarc.reportOrgName` | `postmaster@<hostname>`, the host name | The reports' sender address and reporting organization |
-| `parley.mail.smtp.dmarc.reportIntervalHours`, `parley.mail.smtp.dmarc.maxFailureReportsPerHour` | 24, 10 | How often aggregate reports go out; failure reports per domain per hour |
-| `parley.mail.smtp.arc.verify`, `parley.mail.smtp.arc.seal` | true, true | Validate the ARC chains of incoming mail; seal received mail that is forwarded (if a DKIM key fits the seal domain) |
-| `parley.mail.smtp.arc.domain` | the host name | The `d=` of our ARC seals |
-| `parley.mail.smtp.arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
+| `parley.mail.smtp.arc.verify` | true | Validate the ARC chains of incoming mail |
+| `parley.mail.smtp.serverId` | host, name and port | This server's id among those sharing the store |
 | `parley.mail.smtp.keyStoreName`, `parley.mail.smtp.keyStorePassword`, `parley.mail.smtp.keyStoreType` | none | Key store for STARTTLS and port 465 |
-| `parley.mail.smtp.*` | | The listener's own settings use its prefix: the key store, the limits of parley-core's `AbstractCoreServer` (`maxConnections`, `maxLoginAttempts`, ...) and the access control list (`authenticationProvider`, `userFile`). A server with implicit TLS uses `parley.mail.smtps`. Submission servers use `parley.mail.submission`, and `parley.mail.submissions` with implicit TLS. |
+| `parley.mail.smtp.*` | | Also the limits of parley-core's `AbstractCoreServer` (`maxConnections`, `maxLoginAttempts`, ...) and the access control list (`authenticationProvider`, `userFile`). |
+
+Whether a server is a relay or a submission server comes from how it is made (its provider, or
+`new SmtpServer(port, name, secure, submission)`), never from a setting.
+
+#### Queue settings
+
+In `queue.properties` in the queue's directory, without a prefix:
+
+| Queue setting | Default | Meaning |
+|---|---|---|
+| `hostname` | (required) | The name the queue gives other servers (EHLO) and uses in notifications |
+| `domains` | (required) | Local domains, comma-separated |
+| `aliases`, `postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
+| `relayHost`, `relayUser`, `relayPassword`, `relayTls` | none, none, none, `required` | Smart host; `relayPassword` names where the password is kept (`@keychain:...`, `@file:...`, `@env:...`), never the password |
+| `relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
+| `resolver`, `dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns`. The checks of incoming mail use the same DNS servers. |
+| `preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
+| `tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |
+| `remotePort` | 25 | The port of other mail servers |
+| `workers`, `retry`, `delayWarningHours`, `maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Delivery workers, retry minutes, the delay notice and when a message is returned |
+| `history`, `historyDirectory`, `historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
+| `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
+| `dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
+| `arc.seal`, `arc.domain` | true, none | Seal received mail that is forwarded, as `arc.domain` (no domain: no seal) |
+| `arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
+| `dmarc.aggregateReports`, `dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |
+| `dmarc.reportEmail`, `dmarc.reportOrgName` | (required with reports) | The reports' sender address and reporting organization |
+| `dmarc.reportIntervalHours`, `dmarc.maxFailureReportsPerHour` | 24, 10 | How often aggregate reports go out; failure reports per domain per hour |
 
 ### Not included
 
@@ -294,7 +334,7 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 
 `TestDmarcReports` covers aggregate reports, validated against the RFC 7489 schema (`src/test/resources/dmarc/rfc7489.xsd`, repaired as its header explains). It also covers row counts, restarts, report-address permission and size limits, the ARF failure report, `fo=` options, rate limits, and not reporting on reports. `TestDmarcSmtp` also follows both kinds of report through the queue to a mailbox.
 
-`TestSharedQueue` puts two queues on one directory with `parley.mail.sharedStore=cluster` and a second lock service as another server. It covers each message delivered once, an entry another server holds left alone until it lets go, stale entries dropped or reloaded from the envelope on disk, and which temporary files are removed. `TestSharedDmarcReports` covers two reporters on one directory: one report with both servers' evaluations, a flush that leaves the work to the server sending, and one timed sending per interval.
+`TestSharedQueue` puts two queues on one directory of a store whose settings say `sharing=cluster` and a second lock service as another server. It covers each message delivered once, an entry another server holds left alone until it lets go, stale entries dropped or reloaded from the envelope on disk, and which temporary files are removed. `TestSharedDmarcReports` covers two reporters on one directory: one report with both servers' evaluations, a flush that leaves the work to the server sending, and one timed sending per interval.
 
 `TestArcSuite` runs the ValiMail ARC test suite (`src/test/resources/arc/`, MIT licence, from github.com/ValiMail/arc_test_suite). All 171 validation cases pass. One case, `ams_fields_c_na`, is checked as `fail` rather than the suite's `pass`: RFC 8617 makes `c=` default to `simple/simple`, as in DKIM, and the suite assumes `relaxed`. In the signing cases, every ARC-Authentication-Results and ARC-Message-Signature field matches exactly. The ARC-Seal `b=` values the suite expects are out of date: its own later messages carry the seals for the same input, and ours match those byte for byte. Every set we make is also validated. `TestArcSmtp` forwards mail through an alias on one server to another. It covers the added set, `arc=pass`, a DMARC failure overridden for a trusted sealer (with its aggregate report row), and a rejection when the sealer isn't trusted.
 
