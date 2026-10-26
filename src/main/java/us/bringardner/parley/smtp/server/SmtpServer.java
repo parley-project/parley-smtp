@@ -249,21 +249,48 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 */
 	private void useQueueSettings(java.util.Properties q, FileSource queueDir) throws IOException {
 		String where = " (" + queueDir.getAbsolutePath() + "/" + MailQueue.SETTINGS_FILE + ")";
-		DeliveryConfig c = deliveryConfig;
-		String host = queueSetting(q, "hostname");
-		if (host == null) {
+		checkQueueSettings(q, where); // before anything is changed: a refused queue leaves nothing behind
+		try {
+			applyQueueSettings(q, where);
+		} catch (RuntimeException e) {
+			throw new IOException("Wrong mail queue settings" + where + ": " + e.getMessage(), e);
+		}
+	}
+
+	/** The queue's settings that must be there, or be right, before any is used */
+	private void checkQueueSettings(java.util.Properties q, String where) throws IOException {
+		if (queueSetting(q, "hostname") == null) {
 			throw new IOException("The mail queue's hostname isn't set" + where);
 		}
-		c.setHostname(host);
-		String domains = queueSetting(q, "domains");
-		if (domains == null && c.getLocalDomains().isEmpty()) {
+		if (queueSetting(q, "domains") == null) {
 			throw new IOException("The mail queue's domains aren't set" + where);
 		}
-		if (domains != null) {
-			for (String d : domains.split(",")) {
-				if (!d.trim().isEmpty()) {
-					c.addLocalDomain(d.trim());
-				}
+		String pw = queueSetting(q, "relayPassword");
+		if (pw != null && !us.bringardner.parley.files.credentials.CredentialRef.isReference(pw)) {
+			throw new IOException("The mail queue's relayPassword must name where the password is kept (@keychain:..., @file:..., @env:...), not hold it"
+					+ where);
+		}
+		DmarcReporter reporter = deliveryConfig.getDmarc().getReporter();
+		String agg = queueSetting(q, "dmarc.aggregateReports");
+		String fail = queueSetting(q, "dmarc.failureReports");
+		boolean reports = (agg != null ? Boolean.parseBoolean(agg) : reporter.isAggregate()) || (fail != null ? Boolean.parseBoolean(fail) : reporter.isFailure());
+		String org = queueSetting(q, "dmarc.reportOrgName");
+		String email = queueSetting(q, "dmarc.reportEmail");
+		// no default from another setting: reports say who sends them only when told
+		boolean noOrg = org == null && (reporter.getOrgName() == null || reporter.getOrgName().isEmpty() || "localhost".equals(reporter.getOrgName()));
+		boolean noEmail = email == null && (reporter.getEmail() == null || reporter.getEmail().endsWith("@localhost"));
+		if (reports && (noOrg || noEmail)) {
+			throw new IOException("DMARC reports need dmarc.reportOrgName and dmarc.reportEmail" + where);
+		}
+	}
+
+	private void applyQueueSettings(java.util.Properties q, String where) throws IOException {
+		DeliveryConfig c = deliveryConfig;
+		String host = queueSetting(q, "hostname");
+		c.setHostname(host);
+		for (String d : queueSetting(q, "domains").split(",")) {
+			if (!d.trim().isEmpty()) {
+				c.addLocalDomain(d.trim());
 			}
 		}
 		String tmp = queueSetting(q, "postmaster");
@@ -292,10 +319,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		tmp = queueSetting(q, "relayPassword");
 		if (tmp != null) {
 			// a secret: the settings name where it is kept (@keychain:..., @file:..., @env:...), never the password
-			if (!us.bringardner.parley.files.credentials.CredentialRef.isReference(tmp)) {
-				throw new IOException("The mail queue's relayPassword must name where the password is kept (@keychain:..., @file:..., @env:...), not hold it"
-						+ where);
-			}
 			char[] secret = us.bringardner.parley.files.credentials.Credentials.secret(tmp,
 					us.bringardner.parley.files.credentials.CredentialRequest.forProperty("relayPassword"));
 			c.setRelayPassword(new String(secret));
@@ -386,12 +409,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 		if (email != null) {
 			reporter.setEmail(email);
-		}
-		// no default from another setting: reports say who sends them only when told
-		boolean noOrg = reporter.getOrgName() == null || reporter.getOrgName().isEmpty() || "localhost".equals(reporter.getOrgName());
-		boolean noEmail = reporter.getEmail() == null || reporter.getEmail().endsWith("@localhost");
-		if ((reporter.isAggregate() || reporter.isFailure()) && (noOrg || noEmail)) {
-			throw new IOException("DMARC reports need dmarc.reportOrgName and dmarc.reportEmail" + where);
 		}
 		tmp = queueSetting(q, "dmarc.reportIntervalHours");
 		if (tmp != null) {
@@ -535,12 +552,13 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				useQueueSettings(settings, dir);
 				deliveryConfig.setMaildropRoot(root);
 				deliveryConfig.setAccessControl(getAccessControl());
-				queue = new MailQueue(dir, deliveryConfig);
 				QueueHistory history = QueueHistory.fromSettings(root, settings);
+				MailQueue made = new MailQueue(dir, deliveryConfig);
 				if (history != null) {
-					queue.addQueueListener(history);
+					made.addQueueListener(history);
 					queueHistory = history;
 				}
+				queue = made;
 			} catch (IOException e) {
 				throw new java.io.UncheckedIOException(e);
 			}
