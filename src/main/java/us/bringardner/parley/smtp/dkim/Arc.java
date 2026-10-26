@@ -83,10 +83,10 @@ public final class Arc {
 	 * the seal domain.
 	 */
 	public ArcSealer sealer(Dkim dkim, String hostname) {
-		if (!seal) {
-			return null;
+		if (!seal || domain == null || domain.isEmpty()) {
+			return null; // no seal domain, no seal (it isn't taken from the host name)
 		}
-		DkimSigner signer = dkim.signerFor(domain != null ? domain : hostname);
+		DkimSigner signer = dkim.signerFor(domain);
 		if (signer == null || !DkimSigner.RSA_SHA256.equals(signer.getAlgorithm())) {
 			return null;
 		}

@@ -63,7 +63,8 @@ public class TestArcSmtp {
 		r.startAndWait(10000);
 
 		f = server(rootF, "mx.f.test", "f.test");
-		// seals with the f.test key (the closest parent of the host name mx.f.test)
+		// seals as mx.f.test (its arc.domain) with the f.test key, the closest parent
+		f.getArc().setDomain("mx.f.test");
 		f.getDkim().addSigner(new DkimSigner("f.test", "k1", key.getPrivate()));
 		f.getDeliveryConfig().addAlias("list", "team1@r.test");
 		f.getDeliveryConfig().setResolver((domain, port) -> {
