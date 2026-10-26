@@ -38,8 +38,8 @@ import us.bringardner.parley.smtp.queue.MailQueueMXBean;
 import us.bringardner.parley.smtp.queue.QueueHistory;
 
 /**
- * The SMTP providers: the relay and submission servers sharing one queue (made when the first
- * starts, let go when the last stops), the queue's JMX bean, and its history.
+ * The SMTP providers: the relay and submission servers, each from its own configuration, using the
+ * queue their settings name, each queue's JMX bean, its history, and what a server needs to start.
  */
 public class TestSmtpProviders {
 
@@ -115,15 +115,24 @@ public class TestSmtpProviders {
 		assertTrue(ServerLauncher.providers().keySet().containsAll(Arrays.asList("smtp", "submission", "submissions")));
 	}
 
+	private static us.bringardner.parley.files.FileSource fs(File f) throws java.io.IOException {
+		return us.bringardner.parley.files.FileSourceFactory.getDefaultFactory().createFileSource(f.getPath());
+	}
+
+	/**
+	 * The relay and submission servers, each from its own configuration, given the same queue: each
+	 * opens it (as servers in two processes would) and its queue is a JMX bean named after it.
+	 */
 	@Test
-	public void relayAndSubmissionShareTheQueue() throws Exception {
+	public void relayAndSubmissionUseTheQueueTheirSettingsName() throws Exception {
 		int smtp = freePort();
 		int submission = freePort();
 		File mail = new File(dir, "mail");
+		us.bringardner.parley.smtp.test.MailStoreSetup.setUp(fs(mail), "localhost", "localhost"); // the administrator
 		write("users.txt", "tony , secret , READ|WRITE");
 		write("parley-mail.properties", "parley.mail.root=" + mail.getPath(), "parley.mail.users=" + new File(dir, "users.txt").getPath());
 		write("parley-smtp.properties", "parley.mail.smtp.port=" + smtp, "parley.mail.submission.port=" + submission,
-				"parley.mail.smtp.hostname=localhost", "parley.mail.smtp.domains=localhost");
+				"parley.mail.smtp.hostname=mx.localhost", "parley.mail.submission.hostname=submit.localhost");
 		ServerContext context = new ServerContext();
 		launcher = new ServerLauncher("SmtpTest", new LaunchSettings(new Properties()), Arrays.asList("smtp", "submission", "submissions"), dir,
 				context);
@@ -133,14 +142,22 @@ public class TestSmtpProviders {
 		assertEquals(ServerLauncher.State.RUNNING, launcher.getState("smtp"));
 		assertEquals(ServerLauncher.State.RUNNING, launcher.getState("submission"));
 
-		SmtpProviders.SharedQueue shared = (SmtpProviders.SharedQueue) context.get(SmtpProviders.SHARED_QUEUE);
-		assertNotNull(shared.getQueue());
 		MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
 		ObjectName name = new ObjectName("us.bringardner.parley:type=MailQueue,name=smtp");
+		ObjectName subName = new ObjectName("us.bringardner.parley:type=MailQueue,name=submission");
 		assertTrue(mbs.isRegistered(name));
+		assertTrue(mbs.isRegistered(subName));
 		MailQueueMXBean q = JMX.newMXBeanProxy(mbs, name, MailQueueMXBean.class);
 		assertTrue(q.isRunning());
 		assertEquals(new File(mail, QueueHistory.DEFAULT_DIRECTORY).getAbsolutePath(), q.getHistoryDirectory());
+
+		// each server's own hostname
+		try (Socket s = new Socket("127.0.0.1", smtp)) {
+			assertTrue(new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine().contains("mx.localhost"));
+		}
+		try (Socket s = new Socket("127.0.0.1", submission)) {
+			assertTrue(new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine().contains("submit.localhost"));
+		}
 
 		send(smtp);
 		File history = new File(q.getHistoryDirectory(), QueueHistory.PREFIX + LocalDate.now() + QueueHistory.SUFFIX);
@@ -152,7 +169,7 @@ public class TestSmtpProviders {
 		assertTrue(text.contains("\"type\":\"QUEUED\"") && text.contains("\"recipient\":\"tony@localhost\""), text);
 		assertTrue(text.contains("\"type\":\"DELIVERED\""), text);
 
-		// the open connections, through the queue-sharing wrapper
+		// the open connections
 		try (Socket open = new Socket("127.0.0.1", submission)) {
 			new BufferedReader(new InputStreamReader(open.getInputStream(), StandardCharsets.US_ASCII)).readLine(); // the greeting
 			us.bringardner.parley.net.server.ParleyConnection[] list = launcher.getServer("submission").getConnectionList();
@@ -162,16 +179,43 @@ public class TestSmtpProviders {
 			assertFalse(list[0].isSecure());
 		}
 
-		// restarting one SMTP server keeps the queue; stopping both lets it go
-		java.lang.Object before = shared.getQueue();
+		// each server's queue goes with it
 		launcher.restart("submission");
-		assertSame(before, shared.getQueue());
-		launcher.stop("smtp");
+		assertTrue(mbs.isRegistered(name));
+		assertTrue(mbs.isRegistered(subName));
 		launcher.stop("submission");
-		assertEquals(null, shared.getQueue());
+		assertFalse(mbs.isRegistered(subName));
+		assertTrue(mbs.isRegistered(name), "the relay still runs");
+		launcher.stop("smtp");
 		assertFalse(mbs.isRegistered(name));
-		launcher.start("smtp");
-		assertTrue(mbs.isRegistered(name), "a new queue when an SMTP server starts again");
+	}
+
+	/** A queue without settings isn't used: the server doesn't start. */
+	@Test
+	public void aQueueWithoutSettingsIsRefused() throws Exception {
+		File mail = new File(dir, "mail");
+		us.bringardner.parley.mail.store.MailLocks.writeStoreSettings(fs(mail), us.bringardner.parley.net.lock.Sharing.HOST);
+		write("parley-mail.properties", "parley.mail.root=" + mail.getPath());
+		write("parley-smtp.properties", "parley.mail.smtp.port=" + freePort(), "parley.mail.smtp.hostname=mx.localhost");
+		launcher = new ServerLauncher("SmtpNoQueue", new LaunchSettings(new Properties()), Arrays.asList("smtp"), dir,
+				new ServerContext(javax.management.MBeanServerFactory.newMBeanServer()));
+		launcher.init();
+		java.io.IOException e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class, () -> launcher.startAll());
+		assertTrue(e.getMessage().contains(us.bringardner.parley.smtp.queue.MailQueue.SETTINGS_FILE), e.getMessage());
+	}
+
+	/** No hostname: no default from the machine's name, the server doesn't start. */
+	@Test
+	public void aServerWithoutAHostnameIsRefused() throws Exception {
+		File mail = new File(dir, "mail");
+		us.bringardner.parley.smtp.test.MailStoreSetup.setUp(fs(mail), "localhost", "localhost");
+		write("parley-mail.properties", "parley.mail.root=" + mail.getPath());
+		write("parley-smtp.properties", "parley.mail.smtp.port=" + freePort());
+		launcher = new ServerLauncher("SmtpNoHost", new LaunchSettings(new Properties()), Arrays.asList("smtp"), dir,
+				new ServerContext(javax.management.MBeanServerFactory.newMBeanServer()));
+		launcher.init();
+		Exception e = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> launcher.startAll());
+		assertTrue(e.getMessage().contains("parley.mail.smtp.hostname"), e.getMessage());
 	}
 
 	/** AUTH PLAIN on a server; the reply's code */
@@ -196,9 +240,10 @@ public class TestSmtpProviders {
 		int submission = freePort();
 		write("users.txt", "tony , secret , READ|WRITE");
 		write("own.txt", "jose , other , READ|WRITE");
+		us.bringardner.parley.smtp.test.MailStoreSetup.setUp(fs(new File(dir, "mail")), "localhost", "localhost");
 		write("parley-mail.properties", "parley.mail.root=" + new File(dir, "mail").getPath(), "parley.mail.users=" + new File(dir, "users.txt").getPath());
 		write("parley-smtp.properties", "parley.mail.smtp.port=" + smtp, "parley.mail.submission.port=" + submission,
-				"parley.mail.smtp.hostname=localhost", "parley.mail.smtp.domains=localhost",
+				"parley.mail.smtp.hostname=localhost", "parley.mail.submission.hostname=localhost",
 				"parley.mail.submission.authenticationProvider=us.bringardner.parley.net.server.FileBasedAcl",
 				"parley.mail.submission.userFile=" + new File(dir, "own.txt").getPath());
 		ServerContext context = new ServerContext(javax.management.MBeanServerFactory.newMBeanServer());
@@ -213,12 +258,10 @@ public class TestSmtpProviders {
 
 	@Test
 	public void legacySecureRelay() {
-		System.setProperty("parley.mail.smtp.secure", "true");
-		System.setProperty("parley.mail.smtps.port", "0");
-		try {
-			assertFalse(ServerLauncher.providers().get("smtp").enabled(), "the relay's port is parley.mail.smtps.port then");
-		} finally {
-			System.clearProperty("parley.mail.smtps.port");
-		}
+		Properties c = new Properties();
+		c.setProperty("parley.mail.smtp.secure", "true");
+		c.setProperty("parley.mail.smtps.port", "0");
+		assertFalse(ServerLauncher.providers().get("smtp").enabled(c), "the relay's port is parley.mail.smtps.port then");
+		assertTrue(ServerLauncher.providers().get("smtp").enabled(new Properties()));
 	}
 }

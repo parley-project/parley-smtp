@@ -44,9 +44,23 @@ import us.bringardner.parley.smtp.queue.QueueHistory;
  * users' INBOXes; other mail is relayed to the domain's MX hosts (or a smart
  * host), but only for authenticated users or trusted networks.
  * <p>
- * One SmtpServer listens on one port. For port 25 (relay) plus 587 (submission,
- * RFC 6409) run two servers sharing one queue ({@link #setQueue(MailQueue)}),
- * as {@link #main(String[])} does.
+ * One SmtpServer listens on one port, and is written as if it were the only server: it reads only
+ * its own settings, under its prefix ({@value #SMTP_PREFIX}, {@value #SMTPS_PREFIX},
+ * {@value #SUBMISSION_PREFIX} or {@value #SUBMISSIONS_PREFIX}), from its configuration (the system
+ * properties for a server made by code). Whether it is a relay or a submission server comes from how
+ * it is made ({@link #SmtpServer(int, String, boolean, boolean)}, {@link #submissionServer(boolean)}).
+ * <p>
+ * Its own settings are about its port: {@code hostname} (required: the greeting and Received
+ * headers), {@code requireTls}, {@code relayNetworks}, {@code maxMessageSize}, {@code maxRecipients},
+ * {@code timeout}, {@code maxHops}, the checks of incoming mail ({@code dkim.verify},
+ * {@code spf.check}, {@code spf.rejectFail}, {@code dmarc.check}, {@code dmarc.enforce},
+ * {@code dmarc.publicSuffixList}, {@code arc.verify}) and where its queue is ({@value #QUEUE},
+ * default {@value #QUEUE_DIRECTORY} under the maildrop root).
+ * <p>
+ * The queue is a shared asset and carries its own settings ({@link MailQueue#SETTINGS_FILE} in its
+ * directory): how its mail is delivered, read by every server that uses it. A queue without them
+ * isn't used, and the server doesn't start. Servers given the same queue share it through the
+ * store's locks (in one JVM or several), so the store's sharing must allow them.
  */
 public class SmtpServer extends AbstractMailServer implements SMTP {
 
@@ -60,24 +74,27 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	public static final String SUBMISSION_PREFIX = "parley.mail.submission";
 	/** The prefix of the properties of a submission server with implicit TLS (RFC 8314, port 465). */
 	public static final String SUBMISSIONS_PREFIX = "parley.mail.submissions";
-	/** A properties file main loads into the system properties. */
+	/** A settings file for the servers' configuration (see parley-net's ServerLauncher). */
 	public static final String CONFIG_PROP = SMTP_PREFIX + ".configFile";
 	/** The maildrop root, shared with POP3 and IMAP. */
 	public static final String ROOT_PROP = MAIL_ROOT_PROP;
 	public static final String FILE_SOURCE_PROP = MAIL_FILE_SOURCE_PROP;
+	/** The default queue: a directory of this name under the maildrop root */
 	public static final String QUEUE_DIRECTORY = ".smtp-queue";
+	/** Server setting (after its prefix): its queue, a directory under the maildrop root (default {@value #QUEUE_DIRECTORY}) */
+	public static final String QUEUE = "queue";
 	/** Where DMARC aggregate report data waits to be sent, under the maildrop root. */
 	public static final String DMARC_REPORT_DIRECTORY = ".dmarc-reports";
 	public static final long DEFAULT_MAX_MESSAGE_SIZE = 50L * 1024 * 1024;
 
-	private static final String P = SMTP_PREFIX + ".";
-
 	private volatile String hostname;
-	private volatile boolean submission = Boolean.getBoolean(P + "submission");
-	private volatile long maxMessageSize = Long.getLong(P + "maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
-	private volatile int maxRecipients = Integer.getInteger(P + "maxRecipients", 100);
-	private volatile int timeout = Integer.getInteger(P + "timeout", 5 * 60 * 1000);
-	private volatile int maxHops = Integer.getInteger(P + "maxHops", 100);
+	private volatile boolean submission;
+	private volatile long maxMessageSize = DEFAULT_MAX_MESSAGE_SIZE;
+	private volatile int maxRecipients = 100;
+	private volatile int timeout = 5 * 60 * 1000;
+	private volatile int maxHops = 100;
+	/** this server's queue: a directory under the maildrop root */
+	private volatile String queueLocation = QUEUE_DIRECTORY;
 	//  Replaced (not changed) when a network is added, so isRelayAllowed needs no lock
 	private volatile AddressMatcher relayNetworks = AddressMatcher.NONE;
 
@@ -89,9 +106,27 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private boolean queueStarted;
 
 	public SmtpServer(int port, String name, boolean secure) {
-		super(port, name, secure ? SMTPS_PREFIX : SMTP_PREFIX, secure);
+		this(port, name, secure, false);
+	}
+
+	/**
+	 * @param secure     implicit TLS
+	 * @param submission a submission server (RFC 6409: AUTH required), reading its settings with
+	 *                   {@value #SUBMISSION_PREFIX} ({@value #SUBMISSIONS_PREFIX} with implicit TLS)
+	 */
+	public SmtpServer(int port, String name, boolean secure, boolean submission) {
+		super(port, name, prefixOf(secure, submission), secure);
+		this.submission = submission;
 		initMe();
 		finishInit();
+	}
+
+	/** The prefix of a server's settings */
+	static String prefixOf(boolean secure, boolean submission) {
+		if (submission) {
+			return secure ? SUBMISSIONS_PREFIX : SUBMISSION_PREFIX;
+		}
+		return secure ? SMTPS_PREFIX : SMTP_PREFIX;
 	}
 
 	@Override
@@ -105,18 +140,15 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	/** A submission server (RFC 6409): port 587, or 465 with implicit TLS (RFC 8314). */
 	public static SmtpServer submissionServer(boolean implicitTls) {
-		SmtpServer s = new SmtpServer(implicitTls ? SUBMISSIONS_PORT : SUBMISSION_PORT, SMTP_NAME, implicitTls);
-		s.setSubmission(true);
-		return s;
+		return new SmtpServer(implicitTls ? SUBMISSIONS_PORT : SUBMISSION_PORT, SMTP_NAME, implicitTls, true);
 	}
 
 	/**
 	 * Run the relay (parley.mail.smtp.port, default 25; 0 turns it off), submission
 	 * (parley.mail.submission.port, default 587; 0 turns it off) and, when
-	 * parley.mail.submissions.port is set, submission with implicit TLS, sharing one queue, until the
-	 * process is stopped; see {@link SmtpProviders} and parley-net's ServerMain.launch. Each server
-	 * reads its own settings (key store, limits, access control) with its prefix:
-	 * parley.mail.smtp, parley.mail.submission and parley.mail.submissions.
+	 * parley.mail.submissions.port is set, submission with implicit TLS, until the process is stopped;
+	 * see {@link SmtpProviders} and parley-net's ServerMain.launch. Each server reads its own settings
+	 * with its prefix: parley.mail.smtp, parley.mail.submission and parley.mail.submissions.
 	 */
 	public static void main(String[] args) throws Exception {
 		ServerMain.launch("SmtpServer", args, "smtp", "submission", "submissions");
@@ -135,31 +167,110 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		// sessions read the socket themselves and time out on their own
 		setMaxIdleConnection(Long.MAX_VALUE / 2);
 
-		setRequireTls(Boolean.getBoolean(P + "requireTls"));
-		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, "/pop3", "C:/pop3");
+		readServerSettings();
 
-		hostname = System.getProperty(P + "hostname");
-		if (hostname == null) {
-			try {
-				hostname = InetAddress.getLocalHost().getCanonicalHostName();
-			} catch (IOException | RuntimeException e) {
-				hostname = "localhost";
-			}
+		IAccessControlList acl = getAccessControl();
+		if (acl == null) {
+			logInfo("No access control is configured for " + getName() + "; no one can log in and no local users exist");
 		}
+	}
+
+	// ------------------------------------------------------------------ settings
+
+	/** A setting of this server (after its prefix), or null */
+	private String setting(String name) {
+		String v = getProperty(propertyName(name));
+		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	private boolean setting(String name, boolean defaultValue) {
+		String v = setting(name);
+		return v == null ? defaultValue : Boolean.parseBoolean(v);
+	}
+
+	private long setting(String name, long defaultValue) {
+		String v = setting(name);
+		return v == null ? defaultValue : Long.parseLong(v);
+	}
+
+	private int setting(String name, int defaultValue) {
+		String v = setting(name);
+		return v == null ? defaultValue : Integer.parseInt(v);
+	}
+
+	/**
+	 * Read this server's own settings (about its port), under its prefix: again when the prefix
+	 * changes ({@link #setSubmission(boolean)}).
+	 */
+	private void readServerSettings() {
+		setRequireTls(setting("requireTls", false));
+		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, null, null);
+		hostname = setting("hostname"); // required: start() says so
+		maxMessageSize = setting("maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
+		maxRecipients = setting("maxRecipients", 100);
+		timeout = setting("timeout", 5 * 60 * 1000);
+		maxHops = setting("maxHops", 100);
+		String networks = setting("relayNetworks");
+		relayNetworks = networks == null ? AddressMatcher.NONE : AddressMatcher.parse(networks);
+		String q = setting(QUEUE);
+		queueLocation = q == null ? QUEUE_DIRECTORY : q;
+
+		// the checks of incoming mail
 		DeliveryConfig c = deliveryConfig;
-		c.setHostname(hostname);
-		String domains = System.getProperty(P + "domains", hostname);
-		for (String d : domains.split(",")) {
-			if (!d.trim().isEmpty()) {
-				c.addLocalDomain(d.trim());
+		c.getDkim().setVerify(setting("dkim.verify", true));
+		Spf spf = c.getSpf();
+		spf.setCheck(setting("spf.check", true));
+		spf.setRejectFail(setting("spf.rejectFail", false));
+		Dmarc dmarc = c.getDmarc();
+		dmarc.setCheck(setting("dmarc.check", true));
+		dmarc.setEnforce(setting("dmarc.enforce", false));
+		String psl = setting("dmarc.publicSuffixList");
+		if (psl != null) {
+			try {
+				dmarc.setPublicSuffixList(PublicSuffixList.load(new File(psl)));
+			} catch (IOException e) {
+				logError("Can't read the public suffix list " + psl + "; using the included copy", e);
 			}
 		}
-		String networks = System.getProperty(P + "relayNetworks");
-		if (networks != null) {
-			relayNetworks = relayNetworks.and(AddressMatcher.parse(networks));
+		c.getArc().setVerify(setting("arc.verify", true));
+	}
+
+	/** A queue setting, or null */
+	private static String queueSetting(java.util.Properties q, String name) {
+		String v = q.getProperty(name);
+		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	/**
+	 * Use the queue's own settings ({@link MailQueue#SETTINGS_FILE}): how its mail is delivered.
+	 * Every server that uses the queue reads the same ones.
+	 *
+	 * @throws IOException if a required one is missing (hostname, domains) or one is wrong
+	 */
+	private void useQueueSettings(java.util.Properties q, FileSource queueDir) throws IOException {
+		String where = " (" + queueDir.getAbsolutePath() + "/" + MailQueue.SETTINGS_FILE + ")";
+		DeliveryConfig c = deliveryConfig;
+		String host = queueSetting(q, "hostname");
+		if (host == null) {
+			throw new IOException("The mail queue's hostname isn't set" + where);
 		}
-		c.setPostmaster(System.getProperty(P + "postmaster", "postmaster"));
-		String aliases = System.getProperty(P + "aliases");
+		c.setHostname(host);
+		String domains = queueSetting(q, "domains");
+		if (domains == null && c.getLocalDomains().isEmpty()) {
+			throw new IOException("The mail queue's domains aren't set" + where);
+		}
+		if (domains != null) {
+			for (String d : domains.split(",")) {
+				if (!d.trim().isEmpty()) {
+					c.addLocalDomain(d.trim());
+				}
+			}
+		}
+		String tmp = queueSetting(q, "postmaster");
+		if (tmp != null) {
+			c.setPostmaster(tmp);
+		}
+		String aliases = queueSetting(q, "aliases");
 		if (aliases != null) {
 			try (InputStream in = getFileSourceFactory().createFileSource(aliases).getInputStream()) {
 				c.loadAliases(new String(in.readAllBytes(), StandardCharsets.UTF_8));
@@ -167,8 +278,8 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				logError("Can't read the aliases file " + aliases, e);
 			}
 		}
-		String tmp = System.getProperty(P + "relayHost");
-		if (tmp != null && !tmp.isEmpty()) {
+		tmp = queueSetting(q, "relayHost");
+		if (tmp != null) {
 			int colon = tmp.lastIndexOf(':');
 			if (colon > 0) {
 				c.setRelayHost(tmp.substring(0, colon));
@@ -177,30 +288,43 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				c.setRelayHost(tmp);
 			}
 		}
-		c.setRelayUser(System.getProperty(P + "relayUser"));
-		c.setRelayPassword(System.getProperty(P + "relayPassword"));
-		tmp = System.getProperty(P + "relayAuth");
-		if (tmp != null && !tmp.trim().isEmpty()) {
-			c.setRelayAuthMechanisms(java.util.Arrays.asList(tmp.trim().split("\\s*,\\s*")));
+		c.setRelayUser(queueSetting(q, "relayUser"));
+		tmp = queueSetting(q, "relayPassword");
+		if (tmp != null) {
+			// a secret: the settings name where it is kept (@keychain:..., @file:..., @env:...), never the password
+			if (!us.bringardner.parley.files.credentials.CredentialRef.isReference(tmp)) {
+				throw new IOException("The mail queue's relayPassword must name where the password is kept (@keychain:..., @file:..., @env:...), not hold it"
+						+ where);
+			}
+			char[] secret = us.bringardner.parley.files.credentials.Credentials.secret(tmp,
+					us.bringardner.parley.files.credentials.CredentialRequest.forProperty("relayPassword"));
+			c.setRelayPassword(new String(secret));
+			java.util.Arrays.fill(secret, '\0');
 		}
-		tmp = System.getProperty(P + "relayTls");
+		tmp = queueSetting(q, "relayAuth");
+		if (tmp != null) {
+			c.setRelayAuthMechanisms(java.util.Arrays.asList(tmp.split("\\s*,\\s*")));
+		}
+		tmp = queueSetting(q, "relayTls");
 		if (tmp != null) {
 			c.setRelayTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
 		}
-		tmp = System.getProperty(P + "tls");
+		tmp = queueSetting(q, "tls");
 		if (tmp != null) {
 			c.setTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
 		}
-		c.setRemotePort(Integer.getInteger(P + "remotePort", SMTP_PORT));
-		tmp = System.getProperty(P + "resolver", "jdk").trim().toLowerCase(Locale.ROOT);
+		tmp = queueSetting(q, "remotePort");
+		if (tmp != null) {
+			c.setRemotePort(Integer.parseInt(tmp));
+		}
+		tmp = q.getProperty("resolver", "").trim().toLowerCase(Locale.ROOT);
 		try {
 			switch (tmp) {
 			case "parley-dns":
 			case "bjldns": { // older name, still accepted
-				String list = System.getProperty(P + "dnsServers");
-				ParleyDnsMxResolver r = new ParleyDnsMxResolver(list == null || list.isBlank() ? ParleyDnsMxResolver.systemServers()
-						: ParleyDnsMxResolver.parseServers(list));
-				r.setPreferIpv6(Boolean.getBoolean(P + "preferIpv6"));
+				String list = queueSetting(q, "dnsServers");
+				ParleyDnsMxResolver r = new ParleyDnsMxResolver(list == null ? ParleyDnsMxResolver.systemServers() : ParleyDnsMxResolver.parseServers(list));
+				r.setPreferIpv6(Boolean.parseBoolean(q.getProperty("preferIpv6", "false").trim()));
 				c.setResolver(r);
 				break;
 			}
@@ -209,67 +333,79 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				c.setResolver(ParleyDnsMxResolver.iterative());
 				break;
 			case "jdk":
+			case "": // not set: the resolver as it is (the JDK's, or one set by code)
 				break;
 			default:
-				logInfo("Unknown " + P + "resolver '" + tmp + "'; using the JDK resolver");
+				logInfo("Unknown resolver '" + tmp + "'" + where + "; using the JDK resolver");
 			}
 		} catch (IOException | RuntimeException e) {
 			logError("Can't set up the " + tmp + " resolver; using the JDK resolver", e);
 		}
-		Dkim dkim = c.getDkim();
 		if (c.getResolver() instanceof ParleyDnsMxResolver) {
-			dkim.setLookup(((ParleyDnsMxResolver) c.getResolver())::txt); // the same DNS servers as for MX lookups
+			// the same DNS servers as for MX lookups, for the checks of incoming mail too
+			ParleyDnsMxResolver r = (ParleyDnsMxResolver) c.getResolver();
+			c.getDkim().setLookup(r::txt);
+			c.getSpf().setDns(r::records);
+			c.getDmarc().setDns(r::txt);
 		}
-		dkim.setVerify(Boolean.parseBoolean(System.getProperty(P + "dkim.verify", "true")));
-		tmp = System.getProperty(P + "dkim.keys");
-		if (tmp != null && !tmp.isBlank()) {
-			try {
-				dkim.addSigners(tmp, System.getProperty(P + "dkim.headers"));
-			} catch (IOException | GeneralSecurityException | RuntimeException e) {
-				logError("Can't load the DKIM keys (" + P + "dkim.keys); mail is sent unsigned", e);
-			}
-		}
-		Spf spf = c.getSpf();
-		if (c.getResolver() instanceof ParleyDnsMxResolver) {
-			spf.setDns(((ParleyDnsMxResolver) c.getResolver())::records);
-		}
-		spf.setCheck(Boolean.parseBoolean(System.getProperty(P + "spf.check", "true")));
-		spf.setRejectFail(Boolean.getBoolean(P + "spf.rejectFail"));
-		Dmarc dmarc = c.getDmarc();
-		if (c.getResolver() instanceof ParleyDnsMxResolver) {
-			dmarc.setDns(((ParleyDnsMxResolver) c.getResolver())::txt);
-		}
-		dmarc.setCheck(Boolean.parseBoolean(System.getProperty(P + "dmarc.check", "true")));
-		dmarc.setEnforce(Boolean.getBoolean(P + "dmarc.enforce"));
-		DmarcReporter reporter = dmarc.getReporter();
-		reporter.setAggregate(Boolean.getBoolean(P + "dmarc.aggregateReports"));
-		reporter.setFailure(Boolean.getBoolean(P + "dmarc.failureReports"));
-		reporter.setHostname(hostname);
-		reporter.setOrgName(System.getProperty(P + "dmarc.reportOrgName", hostname));
-		reporter.setEmail(System.getProperty(P + "dmarc.reportEmail", "postmaster@" + hostname));
-		tmp = System.getProperty(P + "dmarc.reportIntervalHours");
+		tmp = queueSetting(q, "dkim.keys");
 		if (tmp != null) {
-			reporter.setIntervalMillis((long) (Double.parseDouble(tmp) * 3_600_000));
-		}
-		reporter.setMaxFailurePerHour(Integer.getInteger(P + "dmarc.maxFailureReportsPerHour", 10));
-		tmp = System.getProperty(P + "dmarc.publicSuffixList");
-		if (tmp != null && !tmp.isBlank()) {
 			try {
-				dmarc.setPublicSuffixList(PublicSuffixList.load(new File(tmp)));
-			} catch (IOException e) {
-				logError("Can't read the public suffix list " + tmp + "; using the included copy", e);
+				c.getDkim().addSigners(tmp, queueSetting(q, "dkim.headers"));
+			} catch (IOException | GeneralSecurityException | RuntimeException e) {
+				logError("Can't load the DKIM keys (dkim.keys" + where + "); mail is sent unsigned", e);
 			}
 		}
 		Arc arc = c.getArc();
-		arc.setVerify(Boolean.parseBoolean(System.getProperty(P + "arc.verify", "true")));
-		arc.setSeal(Boolean.parseBoolean(System.getProperty(P + "arc.seal", "true")));
-		arc.setDomain(System.getProperty(P + "arc.domain"));
-		tmp = System.getProperty(P + "arc.trustedSealers");
+		tmp = queueSetting(q, "arc.seal");
+		if (tmp != null) {
+			arc.setSeal(Boolean.parseBoolean(tmp));
+		}
+		tmp = queueSetting(q, "arc.domain");
+		if (tmp != null) {
+			arc.setDomain(tmp);
+		}
+		tmp = queueSetting(q, "arc.trustedSealers");
 		if (tmp != null) {
 			arc.addTrustedSealers(tmp);
 		}
-		c.setWorkers(Integer.getInteger(P + "queue.workers", 4));
-		tmp = System.getProperty(P + "queue.retry");
+		DmarcReporter reporter = c.getDmarc().getReporter();
+		tmp = queueSetting(q, "dmarc.aggregateReports");
+		if (tmp != null) {
+			reporter.setAggregate(Boolean.parseBoolean(tmp));
+		}
+		tmp = queueSetting(q, "dmarc.failureReports");
+		if (tmp != null) {
+			reporter.setFailure(Boolean.parseBoolean(tmp));
+		}
+		reporter.setHostname(host);
+		String org = queueSetting(q, "dmarc.reportOrgName");
+		String email = queueSetting(q, "dmarc.reportEmail");
+		if (org != null) {
+			reporter.setOrgName(org);
+		}
+		if (email != null) {
+			reporter.setEmail(email);
+		}
+		// no default from another setting: reports say who sends them only when told
+		boolean noOrg = reporter.getOrgName() == null || reporter.getOrgName().isEmpty() || "localhost".equals(reporter.getOrgName());
+		boolean noEmail = reporter.getEmail() == null || reporter.getEmail().endsWith("@localhost");
+		if ((reporter.isAggregate() || reporter.isFailure()) && (noOrg || noEmail)) {
+			throw new IOException("DMARC reports need dmarc.reportOrgName and dmarc.reportEmail" + where);
+		}
+		tmp = queueSetting(q, "dmarc.reportIntervalHours");
+		if (tmp != null) {
+			reporter.setIntervalMillis((long) (Double.parseDouble(tmp) * 3_600_000));
+		}
+		tmp = queueSetting(q, "dmarc.maxFailureReportsPerHour");
+		if (tmp != null) {
+			reporter.setMaxFailurePerHour(Integer.parseInt(tmp));
+		}
+		tmp = queueSetting(q, "workers");
+		if (tmp != null) {
+			c.setWorkers(Integer.parseInt(tmp));
+		}
+		tmp = queueSetting(q, "retry");
 		if (tmp != null) {
 			String[] p = tmp.split(",");
 			long[] schedule = new long[p.length];
@@ -278,19 +414,44 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			}
 			c.setRetrySchedule(schedule);
 		}
-		tmp = System.getProperty(P + "queue.maxAgeHours");
+		tmp = queueSetting(q, "maxAgeHours");
 		if (tmp != null) {
 			c.setMaxAge((long) (Double.parseDouble(tmp) * 3_600_000));
 		}
-		tmp = System.getProperty(P + "queue.delayWarningHours");
+		tmp = queueSetting(q, "delayWarningHours");
 		if (tmp != null) {
 			c.setDelayWarning((long) (Double.parseDouble(tmp) * 3_600_000));
 		}
+	}
 
-		IAccessControlList acl = getAccessControl();
-		if (acl == null) {
-			logInfo("No access control is configured for " + getName() + "; no one can log in and no local users exist");
+	/** The queue's directory: {@link #QUEUE} under the maildrop root */
+	private FileSource queueDirectory(FileSource root) throws IOException {
+		String q = queueLocation.replace('\\', '/');
+		FileSource dir = root;
+		for (String seg : q.split("/")) {
+			if (seg.isEmpty() || seg.equals(".")) {
+				continue;
+			}
+			if (seg.equals("..")) {
+				throw new IOException("The queue (" + propertyName(QUEUE) + "=" + queueLocation + ") must be under the maildrop root");
+			}
+			dir = dir.getChild(seg);
 		}
+		if (dir == root) {
+			throw new IOException("The queue (" + propertyName(QUEUE) + ") can't be the maildrop root itself");
+		}
+		return dir;
+	}
+
+	/** Refuse to start without a hostname (it has no default) */
+	@Override
+	public synchronized void start() {
+		if (hostname == null) {
+			IOException err = new IOException("The hostname isn't set (" + propertyName("hostname") + ")");
+			logError("Can't start " + getName() + ": " + err.getMessage(), err);
+			throw new java.io.UncheckedIOException(err);
+		}
+		super.start();
 	}
 
 	// ------------------------------------------------------------------ life cycle
@@ -342,6 +503,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (queueStarted) {
 			queue.stop();
 			queueStarted = false;
+			if (ownsQueue && queueHistory != null) {
+				queueHistory.close();
+			}
 			if (!queue.isRunning()) {
 				// the last server using the queue (a shared queue's other servers still need the reporter)
 				getDeliveryConfig().getDmarc().getReporter().stop();
@@ -356,15 +520,23 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		return queue != null && !ownsQueue ? queue.getConfig() : deliveryConfig;
 	}
 
-	/** The queue (created when the server starts, unless one was set). */
+	/**
+	 * The queue (opened when the server starts, unless one was set), from this server's
+	 * {@link #QUEUE} setting and the queue's own settings.
+	 *
+	 * @throws java.io.UncheckedIOException if the queue has no settings, or they are wrong
+	 */
 	public synchronized MailQueue getQueue() {
 		if (queue == null) {
 			try {
-				deliveryConfig.setMaildropRoot(getMaildropRoot());
-				deliveryConfig.setAccessControl(getAccessControl());
 				FileSource root = getMaildropRoot();
-				queue = new MailQueue(root.getChild(QUEUE_DIRECTORY), deliveryConfig);
-				QueueHistory history = QueueHistory.fromSettings(root);
+				FileSource dir = queueDirectory(root);
+				java.util.Properties settings = MailQueue.readSettings(dir);
+				useQueueSettings(settings, dir);
+				deliveryConfig.setMaildropRoot(root);
+				deliveryConfig.setAccessControl(getAccessControl());
+				queue = new MailQueue(dir, deliveryConfig);
+				QueueHistory history = QueueHistory.fromSettings(root, settings);
 				if (history != null) {
 					queue.addQueueListener(history);
 					queueHistory = history;
@@ -424,9 +596,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		return hostname;
 	}
 
+	/** The name this server gives in its greeting and Received headers (the queue has its own) */
 	public void setHostname(String hostname) {
 		this.hostname = hostname;
-		deliveryConfig.setHostname(hostname);
 	}
 
 	/**
@@ -465,15 +637,17 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		return submission;
 	}
 
-	/** Submission mode (RFC 6409): AUTH is required, and Date and Message-ID are added if missing. */
 	/**
-	 * Make this a submission server (RFC 6409), or not. A server made a submission server
-	 * with this reads its settings with the {@value #SUBMISSION_PREFIX} prefix
-	 * ({@value #SUBMISSIONS_PREFIX} with implicit TLS) instead of {@value #SMTP_PREFIX}.
+	 * Make this a submission server (RFC 6409: AUTH is required, and Date and Message-ID are added
+	 * if missing), or not. A server made a submission server with this reads its settings again,
+	 * with the {@value #SUBMISSION_PREFIX} prefix ({@value #SUBMISSIONS_PREFIX} with implicit TLS)
+	 * instead of {@value #SMTP_PREFIX}; making it one when it is made
+	 * ({@link #SmtpServer(int, String, boolean, boolean)}) is simpler.
 	 */
 	public void setSubmission(boolean submission) {
 		this.submission = submission;
 		String prefix = getPropertyPrefix();
+		String before = prefix;
 		if (submission && SMTP_PREFIX.equals(prefix)) {
 			setPropertyPrefix(SUBMISSION_PREFIX);
 		} else if (submission && SMTPS_PREFIX.equals(prefix)) {
@@ -482,6 +656,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			setPropertyPrefix(SMTP_PREFIX);
 		} else if (!submission && SUBMISSIONS_PREFIX.equals(prefix)) {
 			setPropertyPrefix(SMTPS_PREFIX);
+		}
+		if (!getPropertyPrefix().equals(before)) {
+			readServerSettings(); // the new prefix's own settings
 		}
 	}
 

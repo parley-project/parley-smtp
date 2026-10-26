@@ -35,6 +35,7 @@ public class TestSpfSmtp {
 		rootB = FileSourceFactory.getDefaultFactory().createTempDirectory("spfB");
 		b = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
 		b.setMaildropRoot(rootB);
+		MailStoreSetup.setUp(rootB, "mx.b.test", "b.test");
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");

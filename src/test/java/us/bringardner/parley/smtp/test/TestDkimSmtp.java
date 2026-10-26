@@ -78,6 +78,7 @@ public class TestDkimSmtp {
 	private static SmtpServer server(FileSource root, String host, String domain) throws IOException {
 		SmtpServer s = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
 		s.setMaildropRoot(root);
+		MailStoreSetup.setUp(root, host, domain); // as an administrator would
 		s.setHostname(host);
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);

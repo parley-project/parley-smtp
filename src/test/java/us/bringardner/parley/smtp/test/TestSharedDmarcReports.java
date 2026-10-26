@@ -47,7 +47,6 @@ import us.bringardner.parley.smtp.spf.SpfResult;
  */
 public class TestSharedDmarcReports {
 
-	private static String before;
 	private static FileSource root;
 	private static LockDomain domain;
 	private static Locks other;
@@ -63,9 +62,8 @@ public class TestSharedDmarcReports {
 
 	@BeforeAll
 	public static void setUpStore() throws Exception {
-		before = System.getProperty(MailLocks.SHARED_STORE_PROPERTY);
-		System.setProperty(MailLocks.SHARED_STORE_PROPERTY, "cluster");
 		root = FileSourceFactory.getDefaultFactory().createTempDirectory("sharedDmarc");
+		MailLocks.writeStoreSettings(root, Sharing.CLUSTER); // the store's own settings
 		domain = MailLocks.acquire(root);
 		other = Locks.open(LockOptions.sharing(Sharing.CLUSTER).withOwnerId("other").withLease(Duration.ofSeconds(2), Duration.ofMillis(400)));
 		otherDomain = other.domain("mail", root);
@@ -78,11 +76,6 @@ public class TestSharedDmarcReports {
 		}
 		MailLocks.release(domain);
 		MailTestSupport.deleteAll(root);
-		if (before == null) {
-			System.clearProperty(MailLocks.SHARED_STORE_PROPERTY);
-		} else {
-			System.setProperty(MailLocks.SHARED_STORE_PROPERTY, before);
-		}
 	}
 
 	@BeforeEach
