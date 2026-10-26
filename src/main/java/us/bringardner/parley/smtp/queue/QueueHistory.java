@@ -73,7 +73,11 @@ public final class QueueHistory implements QueueListener {
 		int days = 30;
 		String n = queueSettings.getProperty(DAYS_PROP);
 		if (n != null && !n.trim().isEmpty()) {
-			days = Integer.parseInt(n.trim());
+			try {
+				days = Integer.parseInt(n.trim());
+			} catch (NumberFormatException e) {
+				throw new IOException("The mail queue's " + DAYS_PROP + "=" + n.trim() + " isn't a number of days", e);
+			}
 		}
 		return new QueueHistory(folder, days);
 	}
