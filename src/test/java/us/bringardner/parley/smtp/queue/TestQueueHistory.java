@@ -92,11 +92,15 @@ public class TestQueueHistory {
 	public void theSettings() throws Exception {
 		File root = new File(dir, "mail");
 		root.mkdirs();
+		java.util.Properties q = new java.util.Properties(); // the queue's own settings
 		assertEquals(new File(root, QueueHistory.DEFAULT_DIRECTORY).getAbsolutePath(),
-				QueueHistory.fromSettings(fs(root)).getDirectory().getAbsolutePath());
-		System.setProperty(QueueHistory.DIRECTORY_PROP, new File(dir, "elsewhere").getPath());
-		assertEquals(new File(dir, "elsewhere").getAbsolutePath(), QueueHistory.fromSettings(fs(root)).getDirectory().getAbsolutePath());
+				QueueHistory.fromSettings(fs(root), q).getDirectory().getAbsolutePath());
+		q.setProperty(QueueHistory.DIRECTORY_PROP, new File(dir, "elsewhere").getPath());
+		assertEquals(new File(dir, "elsewhere").getAbsolutePath(), QueueHistory.fromSettings(fs(root), q).getDirectory().getAbsolutePath());
 		System.setProperty(QueueHistory.HISTORY_PROP, "false");
-		assertNull(QueueHistory.fromSettings(fs(root)));
+		assertEquals(new File(dir, "elsewhere").getAbsolutePath(), QueueHistory.fromSettings(fs(root), q).getDirectory().getAbsolutePath(),
+				"not a system property");
+		q.setProperty(QueueHistory.HISTORY_PROP, "false");
+		assertNull(QueueHistory.fromSettings(fs(root), q));
 	}
 }

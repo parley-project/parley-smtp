@@ -1,6 +1,7 @@
 package us.bringardner.parley.smtp.server;
 
 import java.io.IOException;
+import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.management.JMException;
@@ -11,97 +12,35 @@ import us.bringardner.parley.mail.server.MailServerProvider;
 import us.bringardner.parley.net.server.ServerContext;
 import us.bringardner.parley.net.server.ServerMain;
 import us.bringardner.parley.smtp.SMTP;
-import us.bringardner.parley.smtp.queue.MailQueue;
 import us.bringardner.parley.smtp.queue.MailQueueBean;
 
 /**
  * The SMTP servers a launcher can run ({@code parley.servers=smtp,submission,submissions}): the
- * relay (MX, port 25), submission (587) and submission with implicit TLS (465). Settings come from
- * {@code parley-mail.properties}, then {@code parley-smtp.properties} (or the file
- * {@code parley.mail.smtp.configFile} names).
+ * relay (MX, port 25), submission (587) and submission with implicit TLS (465). Each is made from
+ * its own configuration, read from {@code parley-mail.properties}, then {@code parley-smtp.properties}
+ * (or the file {@code parley.mail.smtp.configFile} names).
  * <p>
- * The SMTP servers of one JVM share one queue, made from the {@code parley.mail.smtp.*} settings
- * when the first of them starts and let go when the last one stops (so a restart of every SMTP
- * server reads the delivery settings again). While it exists it is the JMX bean
- * {@code us.bringardner.parley:type=MailQueue,name=smtp} ({@link us.bringardner.parley.smtp.queue.MailQueueMXBean}).
+ * Each server opens the queue its settings name ({@code <prefix>.queue}, default
+ * {@code .smtp-queue} under the maildrop root); servers given the same queue share it through the
+ * store's locks, as servers in separate processes would. While a server runs its queue is the JMX
+ * bean {@code us.bringardner.parley:type=MailQueue,name=ID} (the server's id: smtp, submission, ...;
+ * {@link us.bringardner.parley.smtp.queue.MailQueueMXBean}).
  *
  * @since 2.0.0
  */
 public final class SmtpProviders {
 
-	/** The key of the {@link SharedQueue} in the {@link ServerContext} */
-	public static final String SHARED_QUEUE = "parley.mail.smtp.queue";
-
 	private SmtpProviders() {
 	}
 
-	/**
-	 * The queue the SMTP servers of a JVM share: its owner is a server that doesn't listen; the
-	 * queue lives while one of them runs.
-	 */
-	public static final class SharedQueue {
-		private final ServerContext context;
-		private SmtpServer owner;
-		private ObjectName bean;
-		private int users;
-
-		SharedQueue(ServerContext context) {
-			this.context = context;
-		}
-
-		synchronized MailQueue acquire() {
-			if (owner == null) {
-				SmtpServer o;
-				try {
-					o = AbstractMailServer.makeIn(context, () -> new SmtpServer(0, SmtpServer.SMTP_NAME, false));
-				} catch (RuntimeException e) {
-					throw e;
-				} catch (Exception e) {
-					throw new IllegalStateException(e.getMessage(), e);
-				}
-				MailQueue q = o.getQueue();
-				try {
-					bean = context.register("MailQueue", "smtp", new MailQueueBean(q, o.getQueueHistory()));
-				} catch (JMException e) {
-					System.err.println("Can't register the queue's JMX bean: " + e);
-				}
-				owner = o;
-			}
-			users++;
-			return owner.getQueue();
-		}
-
-		synchronized void release() {
-			if (users > 0 && --users == 0) {
-				if (bean != null) {
-					context.unregister(bean);
-					bean = null;
-				}
-				if (owner.getQueueHistory() != null) {
-					owner.getQueueHistory().close();
-				}
-				owner = null;
-			}
-		}
-
-		/** The queue while an SMTP server runs, else null */
-		public synchronized MailQueue getQueue() {
-			return owner == null ? null : owner.getQueue();
-		}
-	}
-
-	static SharedQueue sharedQueue(ServerContext context) throws Exception {
-		return context.shared(SHARED_QUEUE, SharedQueue.class, () -> new SharedQueue(context));
-	}
-
-	/** A server using the shared queue: lets go of it when it stops (on request or by itself) */
-	static ServerMain.Service service(SmtpServer server, String name, SharedQueue shared) {
-		server.setQueue(shared.acquire());
+	/** A server whose queue is a JMX bean while it runs */
+	static ServerMain.Service service(SmtpServer server, String id, String name, ServerContext context) {
 		ServerMain.Service s = ServerMain.service(server, name);
-		AtomicBoolean released = new AtomicBoolean();
-		Runnable release = () -> {
-			if (released.compareAndSet(false, true)) {
-				shared.release();
+		AtomicBoolean registered = new AtomicBoolean();
+		final ObjectName[] bean = new ObjectName[1];
+		Runnable unregister = () -> {
+			if (registered.compareAndSet(true, false) && bean[0] != null) {
+				context.unregister(bean[0]);
 			}
 		};
 		return new ServerMain.Service() {
@@ -112,11 +51,13 @@ public final class SmtpProviders {
 
 			@Override
 			public void startAndWait(long timeoutMillis) throws IOException {
-				try {
-					s.startAndWait(timeoutMillis);
-				} catch (IOException | RuntimeException e) {
-					release.run();
-					throw e;
+				s.startAndWait(timeoutMillis);
+				if (registered.compareAndSet(false, true)) {
+					try {
+						bean[0] = context.register("MailQueue", id, new MailQueueBean(server.getQueue(), server.getQueueHistory()));
+					} catch (JMException | RuntimeException e) {
+						System.err.println("Can't register the queue's JMX bean: " + e);
+					}
 				}
 			}
 
@@ -130,14 +71,14 @@ public final class SmtpProviders {
 				try {
 					s.stop(timeoutMillis);
 				} finally {
-					release.run();
+					unregister.run();
 				}
 			}
 
 			@Override
 			public void awaitStop() throws InterruptedException {
 				s.awaitStop();
-				release.run();
+				unregister.run();
 			}
 
 			@Override
@@ -153,8 +94,9 @@ public final class SmtpProviders {
 	}
 
 	/** {@code parley.mail.smtp.secure=true}: the relay with implicit TLS (on parley.mail.smtps.port) */
-	static boolean legacySecure() {
-		return Boolean.parseBoolean(System.getProperty(SmtpServer.SMTP_PREFIX + ".secure", "false"));
+	static boolean legacySecure(Properties configuration) {
+		String v = configuration.getProperty(SmtpServer.SMTP_PREFIX + ".secure");
+		return v != null && Boolean.parseBoolean(v.trim());
 	}
 
 	/** The relay (MX, port 25): {@code smtp}, on unless parley.mail.smtp.port is 0 */
@@ -164,14 +106,16 @@ public final class SmtpProviders {
 		}
 
 		@Override
-		public int port() {
-			return intProperty((legacySecure() ? SmtpServer.SMTPS_PREFIX : SmtpServer.SMTP_PREFIX) + ".port", SMTP.SMTP_PORT);
+		public int port(Properties configuration) {
+			return intProperty(configuration, (legacySecure(configuration) ? SmtpServer.SMTPS_PREFIX : SmtpServer.SMTP_PREFIX) + ".port", SMTP.SMTP_PORT);
 		}
 
 		@Override
-		public ServerMain.Service create(ServerContext context) throws Exception {
-			return service(AbstractMailServer.makeIn(context, () -> new SmtpServer(port(), SmtpServer.SMTP_NAME, legacySecure())), "SMTP server",
-					sharedQueue(context));
+		public ServerMain.Service create(ServerContext context, Properties configuration) throws Exception {
+			int port = port(configuration);
+			boolean secure = legacySecure(configuration);
+			SmtpServer s = AbstractMailServer.makeIn(context, configuration, () -> new SmtpServer(port, SmtpServer.SMTP_NAME, secure, false));
+			return service(s, id(), "SMTP server", context);
 		}
 	}
 
@@ -182,18 +126,15 @@ public final class SmtpProviders {
 		}
 
 		@Override
-		public int port() {
-			return intProperty(SmtpServer.SUBMISSION_PREFIX + ".port", SMTP.SUBMISSION_PORT);
+		public int port(Properties configuration) {
+			return intProperty(configuration, SmtpServer.SUBMISSION_PREFIX + ".port", SMTP.SUBMISSION_PORT);
 		}
 
 		@Override
-		public ServerMain.Service create(ServerContext context) throws Exception {
-			SmtpServer s = AbstractMailServer.makeIn(context, () -> {
-				SmtpServer made = new SmtpServer(port(), SmtpServer.SMTP_NAME, false);
-				made.setSubmission(true);
-				return made;
-			});
-			return service(s, "Submission server", sharedQueue(context));
+		public ServerMain.Service create(ServerContext context, Properties configuration) throws Exception {
+			int port = port(configuration);
+			SmtpServer s = AbstractMailServer.makeIn(context, configuration, () -> new SmtpServer(port, SmtpServer.SMTP_NAME, false, true));
+			return service(s, id(), "Submission server", context);
 		}
 	}
 
@@ -207,18 +148,15 @@ public final class SmtpProviders {
 		}
 
 		@Override
-		public int port() {
-			return intProperty(SmtpServer.SUBMISSIONS_PREFIX + ".port", 0);
+		public int port(Properties configuration) {
+			return intProperty(configuration, SmtpServer.SUBMISSIONS_PREFIX + ".port", 0);
 		}
 
 		@Override
-		public ServerMain.Service create(ServerContext context) throws Exception {
-			SmtpServer s = AbstractMailServer.makeIn(context, () -> {
-				SmtpServer made = new SmtpServer(port(), SmtpServer.SMTP_NAME, true);
-				made.setSubmission(true);
-				return made;
-			});
-			return service(s, "Submission server (implicit TLS)", sharedQueue(context));
+		public ServerMain.Service create(ServerContext context, Properties configuration) throws Exception {
+			int port = port(configuration);
+			SmtpServer s = AbstractMailServer.makeIn(context, configuration, () -> new SmtpServer(port, SmtpServer.SMTP_NAME, true, true));
+			return service(s, id(), "Submission server (implicit TLS)", context);
 		}
 	}
 }

@@ -58,6 +58,50 @@ import us.bringardner.parley.core.NamedThreadFactory;
  */
 public class MailQueue {
 
+	/**
+	 * The queue's own settings, in its directory: how its mail is delivered (hostname, domains,
+	 * smart host, workers, retry, DKIM signing, ...). Every server that uses the queue reads the
+	 * same file, so they can't disagree; a queue without one isn't used (an administrator makes it).
+	 */
+	public static final String SETTINGS_FILE = "queue.properties";
+
+	/**
+	 * The settings of the queue in this directory.
+	 * @throws IOException if it has none (an administrator makes them) or they can't be read
+	 */
+	public static java.util.Properties readSettings(FileSource dir) throws IOException {
+		FileSource f = dir.getChild(SETTINGS_FILE);
+		if( !f.isFile() ) {
+			throw new IOException("The mail queue " + dir.getAbsolutePath() + " has no settings (" + SETTINGS_FILE
+					+ ", with at least hostname and domains); an administrator makes them");
+		}
+		java.util.Properties p = new java.util.Properties();
+		try (InputStream in = f.getInputStream();
+				java.io.Reader r = new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8)) {
+			p.load(r);
+		}
+		return p;
+	}
+
+	/**
+	 * Make (or replace) the settings of the queue in this directory: an administrator's job.
+	 * @param dir      the queue's directory (made if it isn't there)
+	 * @param settings its settings
+	 * @throws IOException if they can't be written
+	 */
+	public static void writeSettings(FileSource dir, java.util.Properties settings) throws IOException {
+		if( !dir.exists() && !dir.mkdirs() ) {
+			throw new IOException("Can't make the mail queue " + dir.getAbsolutePath());
+		}
+		StringBuilder b = new StringBuilder("# The mail queue's settings, read by every server that uses it\n");
+		for( String n : new java.util.TreeSet<>(settings.stringPropertyNames()) ) {
+			b.append(n).append('=').append(settings.getProperty(n).replace("\\", "\\\\")).append('\n');
+		}
+		try (OutputStream out = dir.getChild(SETTINGS_FILE).getOutputStream()) {
+			out.write(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		}
+	}
+
 	private static final System.Logger LOG = System.getLogger(MailQueue.class.getName());
 	private static final SecureRandom RANDOM = new SecureRandom();
 	private static final AtomicLong SEQUENCE = new AtomicLong();

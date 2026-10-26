@@ -39,7 +39,6 @@ import us.bringardner.parley.smtp.MailAddress;
  */
 public class TestSharedQueue {
 
-	private static String before;
 	private static FileSource root;
 	private static LockDomain domain;
 	/** Another server: a lock service of its own on the same store. */
@@ -52,9 +51,8 @@ public class TestSharedQueue {
 
 	@BeforeAll
 	public static void setUpStore() throws Exception {
-		before = System.getProperty(MailLocks.SHARED_STORE_PROPERTY);
-		System.setProperty(MailLocks.SHARED_STORE_PROPERTY, "cluster");
 		root = FileSourceFactory.getDefaultFactory().createTempDirectory("sharedQueue");
+		MailLocks.writeStoreSettings(root, Sharing.CLUSTER); // the store's own settings
 		domain = MailLocks.acquire(root);
 		other = Locks.open(LockOptions.sharing(Sharing.CLUSTER).withOwnerId("other").withLease(Duration.ofSeconds(2), Duration.ofMillis(400)));
 		otherDomain = other.domain("mail", root);
@@ -67,11 +65,6 @@ public class TestSharedQueue {
 		}
 		MailLocks.release(domain);
 		deleteAll(root);
-		if (before == null) {
-			System.clearProperty(MailLocks.SHARED_STORE_PROPERTY);
-		} else {
-			System.setProperty(MailLocks.SHARED_STORE_PROPERTY, before);
-		}
 	}
 
 	@BeforeEach

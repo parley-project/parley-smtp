@@ -28,12 +28,12 @@ import us.bringardner.parley.files.FileSource;
  */
 public final class QueueHistory implements QueueListener {
 
-	/** Writes the history (default true) */
-	public static final String HISTORY_PROP = "parley.mail.smtp.queue.history";
-	/** The history's folder (default: .smtp-history in the mail root), on the mail root's file system */
-	public static final String DIRECTORY_PROP = "parley.mail.smtp.queue.historyDirectory";
-	/** Days of history kept (default 30; 0 keeps every day) */
-	public static final String DAYS_PROP = "parley.mail.smtp.queue.historyDays";
+	/** Queue setting ({@link MailQueue#SETTINGS_FILE}): writes the history (default true) */
+	public static final String HISTORY_PROP = "history";
+	/** Queue setting: the history's folder (default: .smtp-history in the mail root), on the mail root's file system */
+	public static final String DIRECTORY_PROP = "historyDirectory";
+	/** Queue setting: days of history kept (default 30; 0 keeps every day) */
+	public static final String DAYS_PROP = "historyDays";
 	/** The folder's name in the mail root */
 	public static final String DEFAULT_DIRECTORY = ".smtp-history";
 	public static final String PREFIX = "smtp-";
@@ -57,19 +57,25 @@ public final class QueueHistory implements QueueListener {
 	}
 
 	/**
-	 * The history the settings ask for, or null when it's turned off.
+	 * The history the queue's settings ask for, or null when it's turned off.
 	 *
 	 * @param mailRoot the mail root: the default folder is in it, and a folder the settings name is
 	 *                 on its file system
+	 * @param queueSettings the queue's settings ({@link MailQueue#readSettings})
 	 */
-	public static QueueHistory fromSettings(FileSource mailRoot) throws IOException {
-		if (!Boolean.parseBoolean(System.getProperty(HISTORY_PROP, "true"))) {
+	public static QueueHistory fromSettings(FileSource mailRoot, java.util.Properties queueSettings) throws IOException {
+		if (!Boolean.parseBoolean(queueSettings.getProperty(HISTORY_PROP, "true").trim())) {
 			return null;
 		}
-		String d = System.getProperty(DIRECTORY_PROP);
+		String d = queueSettings.getProperty(DIRECTORY_PROP);
 		FileSource folder = d != null && !d.trim().isEmpty() ? mailRoot.getFileSourceFactory().createFileSource(d.trim())
 				: mailRoot.getChild(DEFAULT_DIRECTORY);
-		return new QueueHistory(folder, Integer.getInteger(DAYS_PROP, 30));
+		int days = 30;
+		String n = queueSettings.getProperty(DAYS_PROP);
+		if (n != null && !n.trim().isEmpty()) {
+			days = Integer.parseInt(n.trim());
+		}
+		return new QueueHistory(folder, days);
 	}
 
 	public FileSource getDirectory() {

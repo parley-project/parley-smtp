@@ -288,6 +288,7 @@ public class TestParleyDnsMxResolver {
 		us.bringardner.parley.smtp.server.SmtpServer a = new us.bringardner.parley.smtp.server.SmtpServer(0, "JSmtp", false);
 		try {
 			b.setMaildropRoot(rootB);
+			MailStoreSetup.setUp(rootB, "mx." + domain, domain);
 			b.setHostname("mx." + domain);
 			b.getDeliveryConfig().getLocalDomains().clear();
 			b.addLocalDomain(domain);
@@ -297,6 +298,7 @@ public class TestParleyDnsMxResolver {
 			b.startAndWait(10000);
 
 			a.setMaildropRoot(rootA);
+			MailStoreSetup.setUp(rootA, "mx.a.test", "a.test");
 			a.setHostname("mx.a.test");
 			a.getDeliveryConfig().getLocalDomains().clear();
 			a.addLocalDomain("a.test");

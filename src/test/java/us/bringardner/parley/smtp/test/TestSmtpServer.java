@@ -113,10 +113,9 @@ public class TestSmtpServer {
 		c.addAlias("loop2", "loop1");
 		a.startAndWait(10000);
 
-		submission = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
+		submission = new SmtpServer(0, SmtpServer.SMTP_NAME, false, true); // a submission server from the start
 		submission.setMaildropRoot(rootA);
 		submission.setHostname("mx.a.test");
-		submission.setSubmission(true);
 		submission.setLoginFailureDelay(0);
 		submission.setQueue(a.getQueue());
 		submission.getLogger().setLevel(Level.ERROR);
@@ -126,6 +125,7 @@ public class TestSmtpServer {
 	private static SmtpServer server(FileSource root, String host, String domain) throws IOException {
 		SmtpServer s = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
 		s.setMaildropRoot(root);
+		MailStoreSetup.setUp(root, host, domain); // as an administrator would
 		s.setHostname(host);
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
