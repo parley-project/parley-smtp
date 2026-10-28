@@ -79,7 +79,7 @@ processes would (so the store's settings must say `sharing=host` or `cluster`). 
 its queue is the JMX bean `us.bringardner.parley:type=MailQueue,name=<id>` (`smtp`, `submission`,
 `submissions`; `MailQueueMXBean`: the messages and their recipients, a message's content, flush,
 retry, delete, reload). `reload` makes the queue read its domains, aliases file and DKIM keys
-(`domains`, `aliases`, `dkim.keys`, `dkim.headers`) again and use them at once, with no restart; a
+(`domains`, `aliases`, `dkim.keys`, `dkim.headers`, `dkim.shared`) again and use them at once, with no restart; a
 mail being received or delivered sees the old ones or the new ones, and if one can't be read, nothing
 changes and `reload` says why. Restart a server to make it read the queue's other settings again.
 
@@ -178,6 +178,8 @@ This writes the private key (PKCS#8 PEM) and prints the TXT record to publish at
 ```java
 relay.getDkim().addSigner(new DkimSigner("example.com", "mail2026", DkimKeys.privateKey(new File("/etc/dkim/example.com.pem"))));
 ```
+
+**One key for every domain.** With `dkim.shared=example.com`, mail from a local domain that has no key of its own (nor a parent domain with one) is signed with example.com's key and selector, as that local domain: `d=example.org; s=mail2026`, so DMARC finds it aligned. Each such domain must publish the same public key at `mail2026._domainkey.example.org`. With Parley DNS that takes nothing: a domain's zone inherits the record from the primary domain's zone, so it needs no zone file of its own. A domain given its own key in `dkim.keys` signs with it instead. Mail from domains that aren't local is never signed with the shared key.
 
 **Verifying.** Mail from other servers (clients that are neither authenticated nor in `parley.mail.smtp.relayNetworks`) is checked, and the result is added after our Received field:
 
@@ -305,6 +307,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 | `history`, `historyDirectory`, `historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
 | `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
 | `dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
+| `dkim.shared` | none | The domain (in `dkim.keys`) whose key signs mail from every local domain without one of its own |
 | `arc.seal`, `arc.domain` | true, none | Seal received mail that is forwarded, as `arc.domain` (no domain: no seal) |
 | `arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
 | `dmarc.aggregateReports`, `dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |

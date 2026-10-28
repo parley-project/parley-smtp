@@ -14,6 +14,7 @@ import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.net.server.IAccessControlList;
 import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dkim.Dkim;
+import us.bringardner.parley.smtp.dkim.DkimSigner;
 import us.bringardner.parley.smtp.dmarc.Dmarc;
 import us.bringardner.parley.smtp.spf.Spf;
 
@@ -105,6 +106,41 @@ public class DeliveryConfig {
 
 	public boolean isLocalDomain(String asciiDomain) {
 		return localDomains.contains(asciiDomain.toLowerCase(Locale.ROOT));
+	}
+
+	/**
+	 * The local domain a domain is, or is under (the closest), or null
+	 *
+	 * @since 2.0.0
+	 */
+	public String localDomainOf(String asciiDomain) {
+		if (asciiDomain == null) {
+			return null;
+		}
+		String d = asciiDomain.toLowerCase(Locale.ROOT);
+		Set<String> local = localDomains;
+		while (true) {
+			if (local.contains(d)) {
+				return d;
+			}
+			int dot = d.indexOf('.');
+			if (dot < 0) {
+				return null;
+			}
+			d = d.substring(dot + 1);
+		}
+	}
+
+	/**
+	 * The DKIM signer for mail from a domain: the key of the domain, or of its closest parent with one
+	 * ({@link Dkim#signerFor}), else the shared key ({@link Dkim#setShared}) when the domain is, or is
+	 * under, a local domain, signing as that local domain; else null.
+	 *
+	 * @since 2.0.0
+	 */
+	public DkimSigner dkimSignerFor(String fromDomain) {
+		DkimSigner s = getDkim().signerFor(fromDomain);
+		return s != null ? s : getDkim().sharedSignerFor(localDomainOf(fromDomain));
 	}
 
 	public FileSource getMaildropRoot() {

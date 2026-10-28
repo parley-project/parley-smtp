@@ -95,6 +95,23 @@ public final class DkimSigner {
 		return domain;
 	}
 
+	/**
+	 * This signer's key, selector and settings for another signing domain (d=): a key shared by
+	 * several domains, each publishing the same public key at selector._domainkey.domain (with Parley
+	 * DNS, by inheriting the record from the primary domain's zone). The i= identity isn't carried over.
+	 *
+	 * @since 2.0.0
+	 */
+	public DkimSigner forDomain(String otherDomain) {
+		DkimSigner s = new DkimSigner(otherDomain, selector, key);
+		s.headers = headers;
+		s.oversign = oversign;
+		s.headerCanon = headerCanon;
+		s.bodyCanon = bodyCanon;
+		s.expireSeconds = expireSeconds;
+		return s;
+	}
+
 	public String getSelector() {
 		return selector;
 	}

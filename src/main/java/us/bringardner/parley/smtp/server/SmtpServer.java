@@ -380,6 +380,12 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				logError("Can't load the DKIM keys (dkim.keys" + where + "); mail is sent unsigned", e);
 			}
 		}
+		tmp = queueSetting(q, "dkim.shared");
+		c.getDkim().setShared(tmp);
+		if (tmp != null && c.getDkim().sharedSignerFor(tmp) == null) {
+			logError("The shared DKIM key's domain " + tmp + " has no key in dkim.keys" + where
+					+ "; mail from local domains without a key of their own is sent unsigned");
+		}
 		Arc arc = c.getArc();
 		tmp = queueSetting(q, "arc.seal");
 		if (tmp != null) {
@@ -478,17 +484,22 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				throw new IOException("Can't load the DKIM keys (dkim.keys" + where + "): " + e.getMessage(), e);
 			}
 		}
-		DeliveryConfig c = getQueue().getConfig();
-		// the aliases and keys before the domains: a new domain is local only once they are there
-		c.setAliases(aliasMap);
-		c.getDkim().setSigners(signers);
-		c.setLocalDomains(domainList);
+		String shared = queueSetting(q, "dkim.shared");
 		List<String> signed = new ArrayList<>();
 		for (DkimSigner s : signers) {
 			signed.add(s.getDomain());
 		}
+		if (shared != null && !signed.contains(shared.toLowerCase(Locale.ROOT))) {
+			throw new IOException("The shared DKIM key's domain " + shared + " has no key in dkim.keys" + where);
+		}
+		DeliveryConfig c = getQueue().getConfig();
+		// the aliases and keys before the domains: a new domain is local only once they are there
+		c.setAliases(aliasMap);
+		c.getDkim().setSigners(signers);
+		c.getDkim().setShared(shared);
+		c.setLocalDomains(domainList);
 		String msg = "Mail queue settings read again" + where + ": domains " + c.getLocalDomains() + ", " + aliasMap.size()
-				+ " aliases, DKIM keys for " + signed;
+				+ " aliases, DKIM keys for " + signed + (shared == null ? "" : ", shared key " + shared);
 		logInfo(msg);
 		return msg;
 	}
