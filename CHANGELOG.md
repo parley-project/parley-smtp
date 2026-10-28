@@ -24,6 +24,17 @@
 
 ### Added
 
+- One DKIM key for every domain: the queue setting `dkim.shared` names the domain whose key signs mail from each
+  local domain without a key of its own, with the same selector and that local domain as d= (DMARC alignment).
+  With Parley DNS each domain inherits the key's record from the primary domain's zone, so it needs no zone file.
+  `Dkim.setShared`/`sharedSignerFor`, `DkimSigner.forDomain`, `DeliveryConfig.localDomainOf`/`dkimSignerFor`; the
+  queue's reload reads it again too, and refuses a shared domain with no key.
+
+- `MailQueueMXBean.reload()` (and `MailQueue.reload()`): the queue reads its domains, aliases file and DKIM keys
+  again and uses them at once, with no restart. Every one is read before any is used, so nothing changes when
+  one can't be read. `DeliveryConfig.setLocalDomains`, `setAliases` and `parseAliases`, and `Dkim.setSigners`
+  and `parseSigners`, replace them whole. parley-mail-admin calls it after a domain, alias or DKIM change.
+
 - **`SmtpProviders`**: parley-net `ServerProvider`s `smtp`, `submission` and `submissions`, so SMTP runs alone or with
   other servers in one process (parley-net's `ServerMain`), and is managed with JMX. Each server's queue is the JMX bean
   `us.bringardner.parley:type=MailQueue,name=<id>` (`MailQueueMXBean`, `QueuedMessageInfo`, `QueuedRecipientInfo`).

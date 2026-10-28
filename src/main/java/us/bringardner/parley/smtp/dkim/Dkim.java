@@ -25,7 +25,8 @@ import us.bringardner.parley.smtp.queue.ParleyDnsMxResolver;
  */
 public final class Dkim {
 
-	private final Map<String, DkimSigner> signers = new ConcurrentHashMap<>();
+	/** Replaced whole by {@link #setSigners} (a reload), so a message is signed with the old keys or the new ones */
+	private volatile Map<String, DkimSigner> signers = new ConcurrentHashMap<>();
 	private volatile boolean verify = true;
 	private volatile int maxSignatures = DkimVerifier.DEFAULT_MAX_SIGNATURES;
 	private volatile DkimKeyLookup lookup;
@@ -33,6 +34,61 @@ public final class Dkim {
 	/** Sign mail from this signer's domain (and its subdomains) with it; replaces another key for the domain. */
 	public void addSigner(DkimSigner signer) {
 		signers.put(signer.getDomain(), signer);
+	}
+
+	/**
+	 * Sign with these keys, in place of the ones there were, all at once.
+	 *
+	 * @since 2.0.0
+	 */
+	public void setSigners(java.util.Collection<DkimSigner> list) {
+		Map<String, DkimSigner> m = new ConcurrentHashMap<>();
+		for (DkimSigner s : list) {
+			m.put(s.getDomain(), s);
+		}
+		signers = m;
+		sharedFor.clear();
+	}
+
+	/** The domain whose key is shared ({@link #setShared}), or null */
+	private volatile String shared;
+	/** The shared key's signer for each domain it signed for */
+	private final Map<String, DkimSigner> sharedFor = new ConcurrentHashMap<>();
+
+	/**
+	 * Sign mail from a local domain that has no key of its own with this domain's key (the queue
+	 * setting {@code dkim.shared}): the same selector, with the local domain as the signing domain
+	 * (d=), so DMARC finds it aligned. Each such domain publishes the same public key at
+	 * selector._domainkey.domain; with Parley DNS it inherits that record from the primary domain's
+	 * zone, so it needs no zone file of its own.
+	 *
+	 * @param domain a domain with a key here, or null for no shared key
+	 * @since 2.0.0
+	 */
+	public void setShared(String domain) {
+		shared = domain == null || domain.trim().isEmpty() ? null : domain.trim().toLowerCase(Locale.ROOT);
+		sharedFor.clear();
+	}
+
+	/** The domain whose key is shared, or null @since 2.0.0 */
+	public String getShared() {
+		return shared;
+	}
+
+	/**
+	 * The shared key's signer for a local domain (see {@link #setShared}), or null if no key is shared
+	 * or the shared domain has none.
+	 *
+	 * @since 2.0.0
+	 */
+	public DkimSigner sharedSignerFor(String localDomain) {
+		String sh = shared;
+		DkimSigner key = sh == null || localDomain == null ? null : signers.get(sh);
+		if (key == null) {
+			return null;
+		}
+		String d = localDomain.toLowerCase(Locale.ROOT);
+		return d.equals(key.getDomain()) ? key : sharedFor.computeIfAbsent(d, key::forDomain);
 	}
 
 	public void removeSigner(String domain) {
@@ -133,6 +189,19 @@ public final class Dkim {
 	 * @param headers fields to sign (comma or colon separated), or null for the defaults
 	 */
 	public void addSigners(String list, String headers) throws IOException, GeneralSecurityException {
+		for (DkimSigner s : parseSigners(list, headers)) {
+			addSigner(s);
+		}
+	}
+
+	/**
+	 * The signers of a list as {@link #addSigners} takes it, with their keys read; nothing is used
+	 * until every key is read.
+	 *
+	 * @since 2.0.0
+	 */
+	public static List<DkimSigner> parseSigners(String list, String headers) throws IOException, GeneralSecurityException {
+		List<DkimSigner> ret = new ArrayList<>();
 		for (String entry : list.split(",")) {
 			String e = entry.trim();
 			if (e.isEmpty()) {
@@ -146,7 +215,8 @@ public final class Dkim {
 			if (headers != null && !headers.trim().isEmpty()) {
 				s.setHeaders(Arrays.asList(headers.trim().split("\\s*[,:]\\s*")));
 			}
-			addSigner(s);
+			ret.add(s);
 		}
+		return ret;
 	}
 }

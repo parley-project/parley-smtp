@@ -39,6 +39,15 @@ public interface MailQueueMXBean {
 	/** Remove a message without delivering it or telling the sender; false if it isn't there or is being delivered */
 	boolean delete(String id) throws IOException;
 
+	/**
+	 * Read the queue's domains, aliases file and DKIM keys again and use them from now on (no restart);
+	 * nothing changes if any of them can't be read. Call it after changing them.
+	 *
+	 * @return what is used now, in a line
+	 * @since 2.0.0
+	 */
+	String reload() throws IOException;
+
 	/** The folder of the queue's history ({@link QueueHistory}), or null if it keeps none */
 	String getHistoryDirectory();
 }
