@@ -35,6 +35,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.core.ILogger.Level;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
@@ -50,7 +51,9 @@ import us.bringardner.parley.mail.store.MailboxRegistry;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.queue.DeliveryException;
 import us.bringardner.parley.smtp.queue.MxResolver;
+import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 import us.bringardner.parley.smtp.server.SmtpServer;
+import us.bringardner.parley.net.IProcessorFactory;
 import us.bringardner.parley.net.ServerTestSupport;
 
 /**
@@ -500,9 +503,17 @@ public class TestSmtpServer {
 			submission.setAccessControl(old);
 			submission.getLogger().setLevel(level);
 		}
-		// a local recipient that can't be looked up is tried again later, not refused as unknown
+		// a local recipient that can't be looked up is tried again later, not refused as unknown,
+		// and the cause is logged, since the reply doesn't give it
 		IAccessControlList delivery = a.getQueue().getConfig().getAccessControl();
 		a.getQueue().getConfig().setAccessControl(downAcl());
+		IProcessorFactory factory = a.getProcessorFactory();
+		RecordingLogger log = new RecordingLogger();
+		a.setProcessorFactory(() -> {
+			SmtpRequestProcessor ret = new SmtpRequestProcessor();
+			ret.setLogger(log);
+			return ret;
+		});
 		try (Client c = new Client(a.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			c.ok("MAIL FROM:<x@elsewhere.test>", "250");
@@ -511,7 +522,12 @@ public class TestSmtpServer {
 			assertTrue(c.cmd("RCPT TO:<sales@a.test>").startsWith("250"), "an alias needs no lookup");
 		} finally {
 			a.getQueue().getConfig().setAccessControl(delivery);
+			a.setProcessorFactory(factory);
 		}
+		assertEquals(1, log.errors.size(), log.errors.toString());
+		String logged = log.errors.get(0);
+		assertTrue(logged.contains("tony@a.test") && logged.contains("the database is down"), logged);
+		assertNotNull(log.causes.get(0), "the exception is logged with its stack trace");
 	}
 
 	@Test
@@ -855,5 +871,28 @@ public class TestSmtpServer {
 			submission.setLoginTimeLimit(0);
 			a.setLoginTimeLimit(0);
 		}
+	}
+
+	/** Keeps the errors a session logs, so a test can check them. */
+	private static class RecordingLogger implements ILogger {
+		final List<String> errors = java.util.Collections.synchronizedList(new ArrayList<>());
+		final List<Throwable> causes = java.util.Collections.synchronizedList(new ArrayList<>());
+		private Level level = Level.ERROR;
+
+		@Override public void init(String name) {}
+		@Override public void setLevel(Level level) { this.level = level; }
+		@Override public Level getLevel() { return level; }
+		@Override public void info(String msg) {}
+		@Override public void info(String msg, Throwable error) {}
+		@Override public boolean isInfoEnabled() { return false; }
+		@Override public void error(String msg) { error(msg, null); }
+		@Override public void error(String msg, Throwable error) { errors.add(msg); causes.add(error); }
+		@Override public boolean isErrorEnabled() { return true; }
+		@Override public void debug(String msg) {}
+		@Override public void debug(String msg, Throwable error) {}
+		@Override public boolean isDebugEnabled() { return false; }
+		@Override public void warn(String msg) {}
+		@Override public void warn(String msg, Throwable error) {}
+		@Override public boolean isWarnEnabled() { return false; }
 	}
 }
