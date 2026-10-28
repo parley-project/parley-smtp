@@ -99,7 +99,9 @@ public class Rcpt extends BaseCommand {
 			try {
 				target = p.getQueue().getLocalDelivery().find(a);
 			} catch (IOException e) {
-				// the users can't be read now (the database is down, say): the client tries again later
+				// the users can't be read now (the database is down, say): the client tries again later.
+				// The reply gives the client no reason, so the cause is logged here
+				p.logError("Can't look up the recipient " + a + ": " + e, e);
 				p.error(LOCAL_ERROR, "4.3.0", "<" + a + ">: Recipient can't be checked now, try again later");
 				return;
 			}
