@@ -89,4 +89,9 @@ public final class MailQueueBean implements MailQueueMXBean {
 	public String getHistoryDirectory() {
 		return history == null ? null : history.getDirectory().getAbsolutePath();
 	}
+
+	@Override
+	public String reload() throws IOException {
+		return queue.reload();
+	}
 }

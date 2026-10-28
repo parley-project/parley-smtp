@@ -1,12 +1,14 @@
 package us.bringardner.parley.smtp.queue;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.net.server.IAccessControlList;
@@ -34,10 +36,12 @@ public class DeliveryConfig {
 	}
 
 	private String hostname = "localhost";
-	private final Set<String> localDomains = new LinkedHashSet<>();
+	/** Replaced whole by {@link #setLocalDomains} (a reload), so a reader sees the old set or the new one */
+	private volatile Set<String> localDomains = new CopyOnWriteArraySet<>();
 	private FileSource maildropRoot;
 	private IAccessControlList accessControl;
-	private final Map<String, List<String>> aliases = new HashMap<>();
+	/** Replaced whole by {@link #setAliases} (a reload), so a reader sees the old aliases or the new ones */
+	private volatile Map<String, List<String>> aliases = new ConcurrentHashMap<>();
 	private String postmaster = "postmaster";
 	private boolean createDefaultMailboxes = true;
 
@@ -75,7 +79,28 @@ public class DeliveryConfig {
 	}
 
 	public void addLocalDomain(String domain) {
-		localDomains.add(java.net.IDN.toASCII(domain.trim(), java.net.IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT));
+		localDomains.add(asciiDomain(domain));
+	}
+
+	/**
+	 * Use these domains, in place of the ones there were, all at once (a mail being received sees the
+	 * old ones or the new ones).
+	 *
+	 * @since 2.0.0
+	 */
+	public void setLocalDomains(Collection<String> domains) {
+		Set<String> set = new LinkedHashSet<>();
+		for (String d : domains) {
+			if (d != null && !d.trim().isEmpty()) {
+				set.add(asciiDomain(d));
+			}
+		}
+		localDomains = new CopyOnWriteArraySet<>(set);
+	}
+
+	/** A domain as the local domains keep it: lower case, A-labels */
+	static String asciiDomain(String domain) {
+		return java.net.IDN.toASCII(domain.trim(), java.net.IDN.ALLOW_UNASSIGNED).toLowerCase(Locale.ROOT);
 	}
 
 	public boolean isLocalDomain(String asciiDomain) {
@@ -111,10 +136,37 @@ public class DeliveryConfig {
 	}
 
 	/**
+	 * Use these aliases (by lower-case local part or address), in place of the ones there were, all
+	 * at once.
+	 *
+	 * @since 2.0.0
+	 */
+	public void setAliases(Map<String, List<String>> map) {
+		Map<String, List<String>> m = new ConcurrentHashMap<>();
+		for (Map.Entry<String, List<String>> e : map.entrySet()) {
+			m.put(e.getKey().toLowerCase(Locale.ROOT), new ArrayList<>(e.getValue()));
+		}
+		aliases = m;
+	}
+
+	/**
 	 * Read an aliases file: lines like {@code sales: tony, jose@example.com};
 	 * "#" starts a comment.
 	 */
 	public void loadAliases(String text) {
+		for (Map.Entry<String, List<String>> e : parseAliases(text).entrySet()) {
+			addAlias(e.getKey(), e.getValue().toArray(new String[0]));
+		}
+	}
+
+	/**
+	 * The aliases of an aliases file's text ({@link #loadAliases}), by lower-case alias, in the
+	 * file's order
+	 *
+	 * @since 2.0.0
+	 */
+	public static Map<String, List<String>> parseAliases(String text) {
+		Map<String, List<String>> ret = new java.util.LinkedHashMap<>();
 		for (String line : text.split("\r?\n")) {
 			int hash = line.indexOf('#');
 			if (hash >= 0) {
@@ -132,9 +184,10 @@ public class DeliveryConfig {
 				}
 			}
 			if (!list.isEmpty()) {
-				addAlias(line.substring(0, colon).trim(), list.toArray(new String[0]));
+				ret.computeIfAbsent(line.substring(0, colon).trim().toLowerCase(Locale.ROOT), k -> new ArrayList<>()).addAll(list);
 			}
 		}
+		return ret;
 	}
 
 	/** The user that receives postmaster mail (RFC 5321 section 4.5.1). */

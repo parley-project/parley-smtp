@@ -148,6 +148,40 @@ public class MailQueue {
 		return config;
 	}
 
+	/**
+	 * Reads the queue's domains, aliases and DKIM keys again (see {@link #reload()}); set by the server
+	 * that made the queue, which knows how its settings are read.
+	 *
+	 * @since 2.0.0
+	 */
+	public interface Reloader {
+		/** @return what is used now, in a line */
+		String reload() throws IOException;
+	}
+
+	private volatile Reloader reloader;
+
+	/** @since 2.0.0 */
+	public void setReloader(Reloader reloader) {
+		this.reloader = reloader;
+	}
+
+	/**
+	 * Read the queue's domains, aliases file and DKIM keys again ({@value #SETTINGS_FILE}) and use them
+	 * from now on, without a restart. Nothing changes if any of them can't be read.
+	 *
+	 * @return what is used now, in a line
+	 * @throws IOException if they can't be read, or no server set how ({@link #setReloader})
+	 * @since 2.0.0
+	 */
+	public String reload() throws IOException {
+		Reloader r = reloader;
+		if (r == null) {
+			throw new IOException("The mail queue " + dir.getAbsolutePath() + " can't read its settings again");
+		}
+		return r.reload();
+	}
+
 	public LocalDelivery getLocalDelivery() {
 		return local;
 	}

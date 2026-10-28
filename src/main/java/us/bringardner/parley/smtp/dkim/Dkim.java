@@ -25,7 +25,8 @@ import us.bringardner.parley.smtp.queue.ParleyDnsMxResolver;
  */
 public final class Dkim {
 
-	private final Map<String, DkimSigner> signers = new ConcurrentHashMap<>();
+	/** Replaced whole by {@link #setSigners} (a reload), so a message is signed with the old keys or the new ones */
+	private volatile Map<String, DkimSigner> signers = new ConcurrentHashMap<>();
 	private volatile boolean verify = true;
 	private volatile int maxSignatures = DkimVerifier.DEFAULT_MAX_SIGNATURES;
 	private volatile DkimKeyLookup lookup;
@@ -33,6 +34,19 @@ public final class Dkim {
 	/** Sign mail from this signer's domain (and its subdomains) with it; replaces another key for the domain. */
 	public void addSigner(DkimSigner signer) {
 		signers.put(signer.getDomain(), signer);
+	}
+
+	/**
+	 * Sign with these keys, in place of the ones there were, all at once.
+	 *
+	 * @since 2.0.0
+	 */
+	public void setSigners(java.util.Collection<DkimSigner> list) {
+		Map<String, DkimSigner> m = new ConcurrentHashMap<>();
+		for (DkimSigner s : list) {
+			m.put(s.getDomain(), s);
+		}
+		signers = m;
 	}
 
 	public void removeSigner(String domain) {
@@ -133,6 +147,19 @@ public final class Dkim {
 	 * @param headers fields to sign (comma or colon separated), or null for the defaults
 	 */
 	public void addSigners(String list, String headers) throws IOException, GeneralSecurityException {
+		for (DkimSigner s : parseSigners(list, headers)) {
+			addSigner(s);
+		}
+	}
+
+	/**
+	 * The signers of a list as {@link #addSigners} takes it, with their keys read; nothing is used
+	 * until every key is read.
+	 *
+	 * @since 2.0.0
+	 */
+	public static List<DkimSigner> parseSigners(String list, String headers) throws IOException, GeneralSecurityException {
+		List<DkimSigner> ret = new ArrayList<>();
 		for (String entry : list.split(",")) {
 			String e = entry.trim();
 			if (e.isEmpty()) {
@@ -146,7 +173,8 @@ public final class Dkim {
 			if (headers != null && !headers.trim().isEmpty()) {
 				s.setHeaders(Arrays.asList(headers.trim().split("\\s*[,:]\\s*")));
 			}
-			addSigner(s);
+			ret.add(s);
 		}
+		return ret;
 	}
 }

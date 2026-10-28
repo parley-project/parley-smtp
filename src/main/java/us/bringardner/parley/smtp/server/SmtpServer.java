@@ -22,6 +22,7 @@ import us.bringardner.parley.net.server.IAccessControlList;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.dkim.Dkim;
+import us.bringardner.parley.smtp.dkim.DkimSigner;
 import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dmarc.Dmarc;
 import us.bringardner.parley.smtp.dmarc.DmarcReporter;
@@ -441,6 +442,57 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 	}
 
+	/**
+	 * Read the queue's domains, aliases file and DKIM keys again ({@link MailQueue#reload()}) and use
+	 * them at once; a mail being received or delivered sees the old ones or the new ones. Every one is
+	 * read before any is used, so nothing changes when one can't be read.
+	 */
+	private String reloadQueueSettings(FileSource dir) throws IOException {
+		String where = " (" + dir.getAbsolutePath() + "/" + MailQueue.SETTINGS_FILE + ")";
+		java.util.Properties q = MailQueue.readSettings(dir);
+		String domains = queueSetting(q, "domains");
+		if (domains == null) {
+			throw new IOException("The mail queue's domains aren't set" + where);
+		}
+		List<String> domainList = new ArrayList<>();
+		for (String d : domains.split(",")) {
+			if (!d.trim().isEmpty()) {
+				domainList.add(d.trim());
+			}
+		}
+		java.util.Map<String, List<String>> aliasMap = java.util.Collections.emptyMap();
+		String aliases = queueSetting(q, "aliases");
+		if (aliases != null) {
+			try (InputStream in = getFileSourceFactory().createFileSource(aliases).getInputStream()) {
+				aliasMap = DeliveryConfig.parseAliases(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+			} catch (IOException e) {
+				throw new IOException("Can't read the aliases file " + aliases + ": " + e.getMessage(), e);
+			}
+		}
+		List<DkimSigner> signers = java.util.Collections.emptyList();
+		String keys = queueSetting(q, "dkim.keys");
+		if (keys != null) {
+			try {
+				signers = Dkim.parseSigners(keys, queueSetting(q, "dkim.headers"));
+			} catch (IOException | GeneralSecurityException | RuntimeException e) {
+				throw new IOException("Can't load the DKIM keys (dkim.keys" + where + "): " + e.getMessage(), e);
+			}
+		}
+		DeliveryConfig c = getQueue().getConfig();
+		// the aliases and keys before the domains: a new domain is local only once they are there
+		c.setAliases(aliasMap);
+		c.getDkim().setSigners(signers);
+		c.setLocalDomains(domainList);
+		List<String> signed = new ArrayList<>();
+		for (DkimSigner s : signers) {
+			signed.add(s.getDomain());
+		}
+		String msg = "Mail queue settings read again" + where + ": domains " + c.getLocalDomains() + ", " + aliasMap.size()
+				+ " aliases, DKIM keys for " + signed;
+		logInfo(msg);
+		return msg;
+	}
+
 	/** The queue's directory: {@link #QUEUE} under the maildrop root */
 	private FileSource queueDirectory(FileSource root) throws IOException {
 		String q = queueLocation.replace('\\', '/');
@@ -554,6 +606,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				deliveryConfig.setAccessControl(getAccessControl());
 				QueueHistory history = QueueHistory.fromSettings(root, settings);
 				MailQueue made = new MailQueue(dir, deliveryConfig);
+				made.setReloader(() -> reloadQueueSettings(dir));
 				if (history != null) {
 					made.addQueueListener(history);
 					queueHistory = history;
