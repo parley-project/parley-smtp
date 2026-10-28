@@ -611,8 +611,8 @@ public class MailQueue {
 	}
 
 	/**
-	 * Sign a message that is being queued with the DKIM key of its From domain
-	 * (see {@link Dkim#signerFor(String)}): the
+	 * Sign a message that is being queued with the DKIM key of its From domain,
+	 * or the shared key for a local domain (see {@link DeliveryConfig#dkimSignerFor(String)}): the
 	 * DKIM-Signature field is put at the top of the file. Nothing happens if
 	 * no key fits. A failure is logged and the message stays unsigned.
 	 *
@@ -633,7 +633,7 @@ public class MailQueue {
 					domain = HeaderFields.addressDomain(from.getValue());
 				}
 			}
-			DkimSigner signer = dkim.signerFor(domain);
+			DkimSigner signer = config.dkimSignerFor(domain);
 			if (signer == null) {
 				return false;
 			}

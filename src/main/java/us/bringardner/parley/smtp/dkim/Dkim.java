@@ -47,6 +47,48 @@ public final class Dkim {
 			m.put(s.getDomain(), s);
 		}
 		signers = m;
+		sharedFor.clear();
+	}
+
+	/** The domain whose key is shared ({@link #setShared}), or null */
+	private volatile String shared;
+	/** The shared key's signer for each domain it signed for */
+	private final Map<String, DkimSigner> sharedFor = new ConcurrentHashMap<>();
+
+	/**
+	 * Sign mail from a local domain that has no key of its own with this domain's key (the queue
+	 * setting {@code dkim.shared}): the same selector, with the local domain as the signing domain
+	 * (d=), so DMARC finds it aligned. Each such domain publishes the same public key at
+	 * selector._domainkey.domain; with Parley DNS it inherits that record from the primary domain's
+	 * zone, so it needs no zone file of its own.
+	 *
+	 * @param domain a domain with a key here, or null for no shared key
+	 * @since 2.0.0
+	 */
+	public void setShared(String domain) {
+		shared = domain == null || domain.trim().isEmpty() ? null : domain.trim().toLowerCase(Locale.ROOT);
+		sharedFor.clear();
+	}
+
+	/** The domain whose key is shared, or null @since 2.0.0 */
+	public String getShared() {
+		return shared;
+	}
+
+	/**
+	 * The shared key's signer for a local domain (see {@link #setShared}), or null if no key is shared
+	 * or the shared domain has none.
+	 *
+	 * @since 2.0.0
+	 */
+	public DkimSigner sharedSignerFor(String localDomain) {
+		String sh = shared;
+		DkimSigner key = sh == null || localDomain == null ? null : signers.get(sh);
+		if (key == null) {
+			return null;
+		}
+		String d = localDomain.toLowerCase(Locale.ROOT);
+		return d.equals(key.getDomain()) ? key : sharedFor.computeIfAbsent(d, key::forDomain);
 	}
 
 	public void removeSigner(String domain) {

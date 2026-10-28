@@ -169,8 +169,17 @@ public class TestQueueReload {
 		assertTrue(e.getMessage().contains("DKIM"), e.getMessage());
 		assertTrue(rcpt(port, "boss@new.example").startsWith("250"), "the aliases read before are still used");
 
+		// a shared key: named in the reload's answer; one whose domain has no key is refused
+		queueSettings(queueDir, "localhost, new.example", "aliases", aliases.getPath(), "dkim.keys", "new.example:s1:" + key.getPath(),
+				"dkim.shared", "new.example");
+		used = bean.reload();
+		assertTrue(used.contains("shared key new.example"), used);
+		queueSettings(queueDir, "localhost, new.example", "dkim.shared", "localhost");
+		e = assertThrows(IOException.class, () -> bean.reload());
+		assertTrue(e.getMessage().contains("shared DKIM key"), e.getMessage());
+
 		// the domain and its key taken out
-		queueSettings(queueDir, "localhost", "dkim.keys", null);
+		queueSettings(queueDir, "localhost", "dkim.keys", null, "dkim.shared", null);
 		used = bean.reload();
 		assertTrue(used.contains("domains [localhost]") && used.contains("DKIM keys for []"), used);
 		assertTrue(rcpt(port, "boss@new.example").startsWith("5"), "no longer a local domain");
