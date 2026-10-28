@@ -78,7 +78,10 @@ servers given the same queue share it through the store's locks, exactly as serv
 processes would (so the store's settings must say `sharing=host` or `cluster`). While a server runs,
 its queue is the JMX bean `us.bringardner.parley:type=MailQueue,name=<id>` (`smtp`, `submission`,
 `submissions`; `MailQueueMXBean`: the messages and their recipients, a message's content, flush,
-retry, delete). Restart a server to make it read the queue's settings again.
+retry, delete, reload). `reload` makes the queue read its domains, aliases file and DKIM keys
+(`domains`, `aliases`, `dkim.keys`, `dkim.headers`) again and use them at once, with no restart; a
+mail being received or delivered sees the old ones or the new ones, and if one can't be read, nothing
+changes and `reload` says why. Restart a server to make it read the queue's other settings again.
 
 **The queue carries its own settings**: `queue.properties` in the queue's directory (see
 "Queue settings" below), read by every server that uses the queue, so they can't disagree about
