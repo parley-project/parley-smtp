@@ -103,4 +103,39 @@ public class TestQueueHistory {
 		q.setProperty(QueueHistory.HISTORY_PROP, "false");
 		assertNull(QueueHistory.fromSettings(fs(root), q));
 	}
+
+	@Test
+	public void theFileSystemOfTheFolderCanBeNamed() throws Exception {
+		File root = new File(dir, "root");
+		root.mkdirs();
+		java.util.Properties q = new java.util.Properties();
+		File local = new File(dir, "local-history");
+		q.setProperty(QueueHistory.FILE_SOURCE_PROP, "FileProxy");
+		q.setProperty(QueueHistory.DIRECTORY_PROP, local.getPath());
+		QueueHistory h = QueueHistory.fromSettings(fs(root), q);
+		assertEquals(local.getAbsolutePath(), h.getDirectory().getAbsolutePath());
+		assertEquals("fileproxy", h.getDirectory().getFileSourceFactory().getTypeId());
+		// the mail root's own type is no different from naming none, and keeps the default folder
+		q.remove(QueueHistory.DIRECTORY_PROP);
+		q.setProperty(QueueHistory.FILE_SOURCE_PROP, fs(root).getFileSourceFactory().getTypeId());
+		assertEquals(new File(root, QueueHistory.DEFAULT_DIRECTORY).getAbsolutePath(),
+				QueueHistory.fromSettings(fs(root), q).getDirectory().getAbsolutePath());
+	}
+
+	@Test
+	public void aFileSystemOtherThanTheRootsNeedsAFolderAndMustExist() throws Exception {
+		File root = new File(dir, "root");
+		root.mkdirs();
+		java.util.Properties q = new java.util.Properties();
+		q.setProperty(QueueHistory.FILE_SOURCE_PROP, "nosuchfs");
+		q.setProperty(QueueHistory.DIRECTORY_PROP, new File(dir, "x").getPath());
+		java.io.IOException e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class, () -> QueueHistory.fromSettings(fs(root), q));
+		assertTrue(e.getMessage().contains("nosuchfs"), e.getMessage());
+		// a type that isn't the root's, with no folder: the default would be in the root's file system
+		String other = fs(root).getFileSourceFactory().getTypeId().equals("fileproxy") ? "jdbc" : "fileproxy";
+		java.util.Properties q2 = new java.util.Properties();
+		q2.setProperty(QueueHistory.FILE_SOURCE_PROP, other);
+		e = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class, () -> QueueHistory.fromSettings(fs(root), q2));
+		assertTrue(e.getMessage().contains(QueueHistory.DIRECTORY_PROP), e.getMessage());
+	}
 }

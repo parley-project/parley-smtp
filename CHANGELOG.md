@@ -23,6 +23,11 @@
     `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
 
 ### Added
+- **`historyFileSource`** (queue setting): the file system the history's folder is on, a FileSource type id such as `FileProxy`
+  for local disk; default the mail root's. It needs `historyDirectory` unless it is the mail root's own type.
+  `QueueHistory.folder(mailRoot, fileSource, directory)` finds the folder, for an application that reads the history.
+  A mail store in a database no longer has to hold the log: on B1 (500 messages, MySQL) the log was 3 of 7 `file_data`
+  inserts and 3 of 23 commits per message.
 
 - One DKIM key for every domain: the queue setting `dkim.shared` names the domain whose key signs mail from each
   local domain without a key of its own, with the same selector and that local domain as d= (DMARC alignment).
