@@ -9,6 +9,7 @@ import java.time.ZoneId;
 import java.util.List;
 
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.FileSourceFactory;
 
 /**
  * The history of a mail queue: every {@link QueueEvent} as a JSON line, one file per day
@@ -34,6 +35,12 @@ public final class QueueHistory implements QueueListener {
 	public static final String DIRECTORY_PROP = "historyDirectory";
 	/** Queue setting: days of history kept (default 30; 0 keeps every day) */
 	public static final String DAYS_PROP = "historyDays";
+	/**
+	 * Queue setting: the file system the history's folder is on (a FileSource type id, such as
+	 * {@code FileProxy} for local disk). Default: the mail root's, so the history is wherever the mail
+	 * is. A file system other than the mail root's needs {@link #DIRECTORY_PROP} too.
+	 */
+	public static final String FILE_SOURCE_PROP = "historyFileSource";
 	/** The folder's name in the mail root */
 	public static final String DEFAULT_DIRECTORY = ".smtp-history";
 	public static final String PREFIX = "smtp-";
@@ -60,16 +67,14 @@ public final class QueueHistory implements QueueListener {
 	 * The history the queue's settings ask for, or null when it's turned off.
 	 *
 	 * @param mailRoot the mail root: the default folder is in it, and a folder the settings name is
-	 *                 on its file system
+	 *                 on its file system, unless they name another ({@link #FILE_SOURCE_PROP})
 	 * @param queueSettings the queue's settings ({@link MailQueue#readSettings})
 	 */
 	public static QueueHistory fromSettings(FileSource mailRoot, java.util.Properties queueSettings) throws IOException {
 		if (!Boolean.parseBoolean(queueSettings.getProperty(HISTORY_PROP, "true").trim())) {
 			return null;
 		}
-		String d = queueSettings.getProperty(DIRECTORY_PROP);
-		FileSource folder = d != null && !d.trim().isEmpty() ? mailRoot.getFileSourceFactory().createFileSource(d.trim())
-				: mailRoot.getChild(DEFAULT_DIRECTORY);
+		FileSource folder = folder(mailRoot, queueSettings.getProperty(FILE_SOURCE_PROP), queueSettings.getProperty(DIRECTORY_PROP));
 		int days = 30;
 		String n = queueSettings.getProperty(DAYS_PROP);
 		if (n != null && !n.trim().isEmpty()) {
@@ -80,6 +85,37 @@ public final class QueueHistory implements QueueListener {
 			}
 		}
 		return new QueueHistory(folder, days);
+	}
+
+	/**
+	 * The history's folder: {@code directory} on the file system {@code fileSource} names, else on the
+	 * mail root's, else (no directory) {@link #DEFAULT_DIRECTORY} in the mail root. Used by the queue
+	 * and by an application that reads the history, so both look in the same place.
+	 *
+	 * @param mailRoot the mail root
+	 * @param fileSource a FileSource type id ({@link #FILE_SOURCE_PROP}), or null/blank for the mail root's
+	 * @param directory the folder ({@link #DIRECTORY_PROP}), or null/blank for the default
+	 * @throws IOException if the file system doesn't exist or can't be connected, or it isn't the mail
+	 *                     root's and there's no directory (the default is in the mail root)
+	 */
+	public static FileSource folder(FileSource mailRoot, String fileSource, String directory) throws IOException {
+		String type = fileSource == null ? "" : fileSource.trim();
+		String d = directory == null ? "" : directory.trim();
+		FileSourceFactory factory = mailRoot.getFileSourceFactory();
+		if (!type.isEmpty() && !type.equalsIgnoreCase(factory.getTypeId())) {
+			if (d.isEmpty()) {
+				throw new IOException("The mail queue's " + FILE_SOURCE_PROP + "=" + type + " needs " + DIRECTORY_PROP
+						+ ": the default folder is in the mail root, which is on " + factory.getTypeId());
+			}
+			factory = FileSourceFactory.getFileSourceFactory(type);
+			if (factory == null) {
+				throw new IOException("There is no file system " + type + " (the mail queue's " + FILE_SOURCE_PROP + ")");
+			}
+			if (!factory.isConnected() && !factory.connect()) {
+				throw new IOException("Can't connect the file system " + type + " of the mail queue's history");
+			}
+		}
+		return d.isEmpty() ? mailRoot.getChild(DEFAULT_DIRECTORY) : factory.createFileSource(d);
 	}
 
 	public FileSource getDirectory() {

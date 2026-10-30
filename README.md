@@ -305,6 +305,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 | `remotePort` | 25 | The port of other mail servers |
 | `workers`, `retry`, `delayWarningHours`, `maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Delivery workers, retry minutes, the delay notice and when a message is returned |
 | `history`, `historyDirectory`, `historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
+| `historyFileSource` | the mail root's | The file system of the history's folder, a FileSource type id such as `FileProxy` (local disk). One other than the mail root's needs `historyDirectory`. Set it to `FileProxy` when the mail is in a database: each log line is a row and a commit there |
 | `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
 | `dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
 | `dkim.shared` | none | The domain (in `dkim.keys`) whose key signs mail from every local domain without one of its own |
