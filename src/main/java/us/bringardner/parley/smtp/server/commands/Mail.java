@@ -41,6 +41,9 @@ public class Mail extends BaseCommand {
 			p.error(AUTH_REQUIRED, "5.7.0", "Authentication required");
 			return;
 		}
+		if (p.mailRefused()) {
+			return;
+		}
 		if (!args.regionMatches(true, 0, "FROM:", 0, 5)) {
 			p.error(PARAMETER_ERROR, "5.5.4", "Syntax: MAIL FROM:<address>");
 			return;

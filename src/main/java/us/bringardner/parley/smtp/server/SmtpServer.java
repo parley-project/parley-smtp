@@ -27,6 +27,7 @@ import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dmarc.Dmarc;
 import us.bringardner.parley.smtp.dmarc.DmarcReporter;
 import us.bringardner.parley.smtp.dmarc.PublicSuffixList;
+import us.bringardner.parley.smtp.abuse.ConnectionChecks;
 import us.bringardner.parley.smtp.spf.Spf;
 import us.bringardner.parley.smtp.queue.ParleyDnsMxResolver;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
@@ -55,7 +56,11 @@ import us.bringardner.parley.smtp.queue.QueueHistory;
  * headers), {@code requireTls}, {@code relayNetworks}, {@code maxMessageSize}, {@code maxRecipients},
  * {@code timeout}, {@code maxHops}, the checks of incoming mail ({@code dkim.verify},
  * {@code spf.check}, {@code spf.rejectFail}, {@code dmarc.check}, {@code dmarc.enforce},
- * {@code dmarc.publicSuffixList}, {@code arc.verify}) and where its queue is ({@value #QUEUE},
+ * {@code dmarc.publicSuffixList}, {@code arc.verify}), the checks of the client before any mail
+ * ({@code dnsbl.zones}, {@code rdns.require}, {@code helo.check}, {@code pregreet.millis},
+ * {@code rate.connectionsPerMinute}, {@code rate.maxConcurrent}, {@code rate.messagesPerMinute},
+ * {@code rate.recipientsPerMinute}, {@code checks.logOnly}: see {@link ConnectionChecks}; all off
+ * by default, and skipped for clients that may relay) and where its queue is ({@value #QUEUE},
  * default {@value #QUEUE_DIRECTORY} under the maildrop root).
  * <p>
  * The queue is a shared asset and carries its own settings ({@link MailQueue#SETTINGS_FILE} in its
@@ -94,6 +99,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private volatile int maxRecipients = 100;
 	private volatile int timeout = 5 * 60 * 1000;
 	private volatile int maxHops = 100;
+	private final ConnectionChecks connectionChecks = new ConnectionChecks();
 	/** this server's queue: a directory under the maildrop root */
 	private volatile String queueLocation = QUEUE_DIRECTORY;
 	//  Replaced (not changed) when a network is added, so isRelayAllowed needs no lock
@@ -234,6 +240,18 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			}
 		}
 		c.getArc().setVerify(setting("arc.verify", true));
+
+		// the checks of the client
+		String zones = setting("dnsbl.zones");
+		connectionChecks.getDnsbl().setZones(zones == null ? new ArrayList<>() : java.util.Arrays.asList(zones.split("[,\\s]+")));
+		connectionChecks.setLogOnly(setting("checks.logOnly", false));
+		connectionChecks.setRequireReverseDns(setting("rdns.require", false));
+		connectionChecks.setCheckHelo(setting("helo.check", false));
+		connectionChecks.setPregreetMillis(setting("pregreet.millis", 0L));
+		connectionChecks.setMaxConnectionsPerMinute(setting("rate.connectionsPerMinute", 0));
+		connectionChecks.setMaxConcurrentPerAddress(setting("rate.maxConcurrent", 0));
+		connectionChecks.setMaxMessagesPerMinute(setting("rate.messagesPerMinute", 0));
+		connectionChecks.setMaxRecipientsPerMinute(setting("rate.recipientsPerMinute", 0));
 	}
 
 	/** A queue setting, or null */
@@ -699,6 +717,11 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	/** DMARC settings (shared by the servers that share a queue). */
 	public Dmarc getDmarc() {
 		return getDeliveryConfig().getDmarc();
+	}
+
+	/** The checks of a client before any mail: block lists, reverse DNS, HELO, pregreet, rates (this port's own). */
+	public ConnectionChecks getConnectionChecks() {
+		return connectionChecks;
 	}
 
 	/** SPF settings (shared by the servers that share a queue). */

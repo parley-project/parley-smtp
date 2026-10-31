@@ -60,6 +60,9 @@ public class Ehlo extends BaseCommand {
 			p.error(PARAMETER_ERROR, "5.5.4", "Syntax: " + getName() + " hostname");
 			return;
 		}
+		if (p.heloRefused(name)) {
+			return;
+		}
 		p.hello(name, true);
 		List<String> lines = new ArrayList<>();
 		lines.add(p.getSmtpServer().getHostname() + " Hello " + name + " [" + p.getClientAddress().getHostAddress() + "]");
