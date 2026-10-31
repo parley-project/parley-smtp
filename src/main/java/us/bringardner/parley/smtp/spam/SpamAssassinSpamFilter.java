@@ -10,9 +10,13 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+
+import us.bringardner.parley.files.ConnectionSetting;
 
 /**
  * Apache SpamAssassin through {@code spamd} (the SPAMC/SPAMD protocol on TCP, default port 783):
@@ -27,30 +31,46 @@ public final class SpamAssassinSpamFilter implements SpamFilter {
 	public static final String ID = "spamassassin";
 	private static final int MAX_ANSWER = 1024 * 1024;
 
-	public static final class Factory implements SpamFilterFactory {
+	/** The provider of this filter, listed in META-INF/services. */
+	public static final class Provider implements SpamProvider {
 		@Override
-		public String id() {
+		public String getId() {
 			return ID;
 		}
 
 		@Override
-		public String label() {
+		public String getTitle() {
 			return "SpamAssassin (spamd)";
 		}
 
 		@Override
-		public List<SpamOption> options() {
+		public String getDescription() {
+			return "Apache SpamAssassin through its spamd daemon (SPAMC protocol, TCP port 783). spamd has no login, so let it listen on "
+					+ "localhost only. Learning needs spamd started with --allow-tell.";
+		}
+
+		@Override
+		public Set<Feature> getFeatures() {
+			return EnumSet.of(Feature.CHECK, Feature.LEARN, Feature.STATUS);
+		}
+
+		@Override
+		public List<ConnectionSetting> getSettings() {
 			return Arrays.asList(
-					new SpamOption("host", "spamd host", SpamOption.Type.TEXT, "127.0.0.1", "Where spamd listens."),
-					new SpamOption("port", "spamd port", SpamOption.Type.NUMBER, "783", "spamd's TCP port."),
-					new SpamOption("user", "spamd user", SpamOption.Type.TEXT, null,
-							"The user spamd applies the preferences of (blank: spamd's default)."));
+					ConnectionSetting.text("host", "spamd host").withDefault("127.0.0.1").withDescription("Where spamd listens."),
+					ConnectionSetting.integer("port", "spamd port", 1L, 65535L).withDefault("783").withDescription("spamd's TCP port."),
+					ConnectionSetting.text("user", "spamd user").asAdvanced()
+							.withDescription("The user spamd applies the preferences of (blank: spamd's default)."));
 		}
 
 		@Override
 		public SpamFilter create(Map<String, String> settings) {
+			List<String> problems = validate(settings);
+			if (!problems.isEmpty()) {
+				throw new IllegalArgumentException(String.join("; ", problems));
+			}
 			int port = Integer.parseInt(settings.getOrDefault("port", "783").trim());
-			int timeout = Integer.parseInt(settings.getOrDefault("timeoutMillis", "5000").trim());
+			int timeout = Integer.parseInt(settings.getOrDefault(TIMEOUT_MILLIS, "5000").trim());
 			return new SpamAssassinSpamFilter(settings.getOrDefault("host", "127.0.0.1").trim(), port,
 					settings.get("user"), timeout);
 		}
@@ -106,6 +126,49 @@ public final class SpamAssassinSpamFilter implements SpamFilter {
 				}
 			}
 			return parse(new String(all.toByteArray(), StandardCharsets.UTF_8));
+		}
+	}
+
+	@Override
+	public void learn(SpamRequest r, boolean spam) throws IOException {
+		try (Socket s = new Socket()) {
+			s.connect(new InetSocketAddress(host, port), timeout);
+			s.setSoTimeout(timeout);
+			OutputStream out = s.getOutputStream();
+			StringBuilder head = new StringBuilder("TELL SPAMC/1.5\r\nContent-length: ").append(r.getSize())
+					.append("\r\nMessage-class: ").append(spam ? "spam" : "ham").append("\r\nSet: local\r\n");
+			if (user != null) {
+				head.append("User: ").append(user.replaceAll("[\\r\\n]", "")).append("\r\n");
+			}
+			head.append("\r\n");
+			out.write(head.toString().getBytes(StandardCharsets.US_ASCII));
+			try (InputStream in = r.openMessage()) {
+				in.transferTo(out);
+			}
+			out.flush();
+			s.shutdownOutput();
+			String first = new java.io.BufferedReader(new java.io.InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine();
+			if (first == null || !first.startsWith("SPAMD/") || !first.split(" ", 3)[1].equals("0")) {
+				throw new IOException("spamd refused to learn: " + first);
+			}
+		}
+	}
+
+	@Override
+	public SpamStatus status() {
+		try (Socket s = new Socket()) {
+			s.connect(new InetSocketAddress(host, port), timeout);
+			s.setSoTimeout(timeout);
+			s.getOutputStream().write("PING SPAMC/1.5\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+			s.getOutputStream().flush();
+			s.shutdownOutput();
+			String first = new java.io.BufferedReader(new java.io.InputStreamReader(s.getInputStream(), StandardCharsets.US_ASCII)).readLine();
+			if (first != null && first.startsWith("SPAMD/") && first.toUpperCase(Locale.ROOT).contains("PONG")) {
+				return SpamStatus.up(first.split(" ", 2)[0].substring(6), "spamd answers at " + host + ":" + port);
+			}
+			return SpamStatus.down("Not a spamd answer at " + host + ":" + port + ": " + first);
+		} catch (IOException e) {
+			return SpamStatus.down("Can't reach spamd at " + host + ":" + port + ": " + e.getMessage());
 		}
 	}
 

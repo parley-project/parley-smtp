@@ -317,7 +317,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 
 ### Not included
 
-- **Spam filtering:** DKIM, SPF, DMARC (with reports) and ARC are supported, and a spam scanner can be plugged in (`spam.*` queue settings: `none`, `rspamd` or `spamassassin`, or your own `SpamFilterFactory`; off by default, with a per-domain override in `spam.domains`). The scanner itself (rspamd, spamd) is a separate program. DMARC reports only go to `mailto:` addresses.
+- **Spam filtering:** DKIM, SPF, DMARC (with reports) and ARC are supported, and a spam scanner can be plugged in (the SMTP server's `spam.*` settings: `none`, `rspamd` or `spamassassin`, found at run time, or your own `SpamProvider` listed in a services file; off by default, with a per-domain override in the queue's `spam.domains`). The scanner itself (rspamd, spamd) is a separate program. DMARC reports only go to `mailto:` addresses.
 - **Envelope sender:** authenticated users may use any address as the sender; it isn't checked against the login.
 - **Optional extensions:** REQUIRETLS, MT-PRIORITY and DELIVERBY aren't implemented.
 

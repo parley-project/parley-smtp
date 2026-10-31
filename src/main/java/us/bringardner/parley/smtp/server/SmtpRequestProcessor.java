@@ -807,8 +807,9 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 
 	/** The spam check of a message from outside (see {@link Spam}); {@link Spam.Outcome#NONE} if no filter applies. */
 	private Spam.Outcome checkSpam(Transaction t) throws IOException {
-		Spam spam = getQueue().getConfig().getSpam();
-		if (!spam.isActive()) {
+		Spam spam = getSmtpServer().getSpam();
+		Map<String, String> overrides = getQueue().getConfig().getSpamDomains();
+		if (!spam.isActive(overrides)) {
 			return Spam.Outcome.NONE;
 		}
 		List<String> rcpts = new ArrayList<>();
@@ -818,7 +819,7 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		String from = t.from == null ? "" : t.from.getLocalPart() + "@" + t.from.getAsciiDomain();
 		FileSource incoming = t.incoming;
 		return spam.check(new SpamRequest(getClientAddress(), helo, from, rcpts, null, getSmtpServer().getHostname(), t.id,
-				incoming.length(), incoming::getInputStream));
+				incoming.length(), incoming::getInputStream), overrides);
 	}
 
 	/**

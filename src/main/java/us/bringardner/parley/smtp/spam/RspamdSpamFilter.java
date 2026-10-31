@@ -8,9 +8,13 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+
+import us.bringardner.parley.files.ConnectionSetting;
 
 /**
  * Rspamd (rspamd.com) over its HTTP API: the message is posted to {@code <url>/checkv2} with the
@@ -24,49 +28,88 @@ public final class RspamdSpamFilter implements SpamFilter {
 
 	public static final String ID = "rspamd";
 	static final String DEFAULT_URL = "http://127.0.0.1:11333";
+	static final String DEFAULT_CONTROLLER_URL = "http://127.0.0.1:11334";
 	private static final int MAX_ANSWER = 1024 * 1024;
 
-	public static final class Factory implements SpamFilterFactory {
+	/** The provider of this filter, listed in META-INF/services. */
+	public static final class Provider implements SpamProvider {
 		@Override
-		public String id() {
+		public String getId() {
 			return ID;
 		}
 
 		@Override
-		public String label() {
+		public String getTitle() {
 			return "Rspamd";
 		}
 
 		@Override
-		public List<SpamOption> options() {
+		public String getDescription() {
+			return "rspamd.com: a fast scanner with its own rules, reputation and learning. Install the rspamd package on a machine the "
+					+ "mail server can reach; it answers over HTTP, by default on 127.0.0.1:11333.";
+		}
+
+		@Override
+		public Set<Feature> getFeatures() {
+			return EnumSet.of(Feature.CHECK, Feature.LEARN, Feature.STATUS);
+		}
+
+		@Override
+		public List<ConnectionSetting> getSettings() {
 			return Arrays.asList(
-					new SpamOption("url", "Rspamd URL", SpamOption.Type.TEXT, DEFAULT_URL,
-							"The base URL of rspamd's normal worker (the controller port 11334 is not it)."),
-					new SpamOption("password", "Rspamd password", SpamOption.Type.SECRET, null,
-							"The password header rspamd expects, if its worker requires one."));
+					ConnectionSetting.text("url", "Rspamd URL").withDefault(DEFAULT_URL)
+							.withDescription("The base URL of rspamd's normal worker (the controller port 11334 is not it)."),
+					ConnectionSetting.secret("password", "Rspamd password")
+							.withDescription("The password header rspamd expects from the normal worker, if it requires one (usually none)."),
+					ConnectionSetting.text("controllerUrl", "Controller URL").withDefault(DEFAULT_CONTROLLER_URL).asAdvanced()
+							.withDescription("Rspamd's controller, which learns spam and ham."),
+					ConnectionSetting.secret("controllerPassword", "Controller password").asAdvanced()
+							.withDescription("The controller's (enable) password, needed to learn."));
+		}
+
+		@Override
+		public List<String> validate(Map<String, String> settings) {
+			List<String> ret = new ArrayList<>(SpamProvider.super.validate(settings));
+			for (String k : new String[] { "url", "controllerUrl" }) {
+				String v = settings.get(k);
+				if (v != null && !v.trim().isEmpty() && !v.trim().startsWith("http://") && !v.trim().startsWith("https://")) {
+					ret.add("The rspamd " + (k.equals("url") ? "URL" : "controller URL") + " must start with http:// or https://: " + v);
+				}
+			}
+			return ret;
 		}
 
 		@Override
 		public SpamFilter create(Map<String, String> settings) {
-			String url = settings.getOrDefault("url", DEFAULT_URL).trim();
+			List<String> problems = validate(settings);
+			if (!problems.isEmpty()) {
+				throw new IllegalArgumentException(String.join("; ", problems));
+			}
+			int timeout = Integer.parseInt(settings.getOrDefault(TIMEOUT_MILLIS, "5000").trim());
+			return new RspamdSpamFilter(base(settings.get("url"), DEFAULT_URL), settings.get("password"),
+					base(settings.get("controllerUrl"), DEFAULT_CONTROLLER_URL), settings.get("controllerPassword"), timeout);
+		}
+
+		private static String base(String v, String def) {
+			String url = v == null || v.trim().isEmpty() ? def : v.trim();
 			while (url.endsWith("/")) {
 				url = url.substring(0, url.length() - 1);
 			}
-			if (!url.startsWith("http://") && !url.startsWith("https://")) {
-				throw new IllegalArgumentException("The rspamd URL must start with http:// or https://: " + url);
-			}
-			int timeout = Integer.parseInt(settings.getOrDefault("timeoutMillis", "5000").trim());
-			return new RspamdSpamFilter(url, settings.get("password"), timeout);
+			return url;
 		}
 	}
 
 	private final String url;
 	private final String password;
+	private final String controllerUrl;
+	private final String controllerPassword;
 	private final int timeout;
 
-	RspamdSpamFilter(String url, String password, int timeoutMillis) {
+	RspamdSpamFilter(String url, String password, String controllerUrl, String controllerPassword, int timeoutMillis) {
 		this.url = url;
 		this.password = password == null || password.isEmpty() ? null : password;
+		this.controllerUrl = controllerUrl;
+		this.controllerPassword = controllerPassword == null || controllerPassword.isEmpty() ? null : controllerPassword;
 		this.timeout = timeoutMillis;
 	}
 
@@ -110,6 +153,51 @@ public final class RspamdSpamFilter implements SpamFilter {
 			return parse(read(c.getInputStream()));
 		} finally {
 			c.disconnect();
+		}
+	}
+
+	@Override
+	public void learn(SpamRequest r, boolean spam) throws IOException {
+		HttpURLConnection c = (HttpURLConnection) new URL(controllerUrl + (spam ? "/learnspam" : "/learnham")).openConnection();
+		try {
+			c.setConnectTimeout(timeout);
+			c.setReadTimeout(timeout);
+			c.setRequestMethod("POST");
+			c.setDoOutput(true);
+			c.setFixedLengthStreamingMode(r.getSize());
+			header(c, "Password", controllerPassword);
+			try (InputStream in = r.openMessage(); OutputStream out = c.getOutputStream()) {
+				in.transferTo(out);
+			}
+			int code = c.getResponseCode();
+			if (code != 200) {
+				throw new IOException("rspamd's controller answered " + code + " " + c.getResponseMessage());
+			}
+		} finally {
+			c.disconnect();
+		}
+	}
+
+	@Override
+	public SpamStatus status() {
+		HttpURLConnection c = null;
+		try {
+			c = (HttpURLConnection) new URL(url + "/ping").openConnection();
+			c.setConnectTimeout(timeout);
+			c.setReadTimeout(timeout);
+			int code = c.getResponseCode();
+			if (code != 200) {
+				return SpamStatus.down("rspamd answered " + code + " " + c.getResponseMessage() + " at " + url);
+			}
+			String server = c.getHeaderField("Server");
+			String version = server != null && server.toLowerCase(Locale.ROOT).startsWith("rspamd/") ? server.substring(7) : "";
+			return SpamStatus.up(version, "rspamd answers at " + url);
+		} catch (IOException e) {
+			return SpamStatus.down("Can't reach rspamd at " + url + ": " + e.getMessage());
+		} finally {
+			if (c != null) {
+				c.disconnect();
+			}
 		}
 	}
 

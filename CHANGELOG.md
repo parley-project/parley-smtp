@@ -23,22 +23,34 @@
     `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
 
 ### Added
-- **Spam filters, pluggable** (`us.bringardner.parley.smtp.spam`): after a message from outside is received (with its
-  SPF/DKIM/DMARC results already in the headers) and before it is accepted, the server asks a `SpamFilter` for a
-  `SpamVerdict` (score, spam or not, the filter's own action, the rules that matched). Three filters are included:
-  `none` (checks nothing), `rspamd` (its HTTP API, `/checkv2`) and `spamassassin` (spamd, SYMBOLS). Another filter is
-  a `SpamFilterFactory` listed in `META-INF/services` or given to `SpamFilters.register`; it describes its settings
-  (`SpamOption`) so the web administration offers them.
-  - Queue settings: `spam.enabled` (default false), `spam.provider` (default `none`), `spam.domains`
-    (`example.com:off,other.org:rspamd`: a recipient domain's own choice, which also works when checking is off for the
-    rest), `spam.rejectScore` / `spam.quarantineScore` (when set, the score decides; otherwise the filter's action, or
-    Junk for what it calls spam), `spam.maxSize` (2 MB), `spam.timeoutMillis` (5000) and `spam.<id>.<option>`
-    (`spam.rspamd.url`, `spam.rspamd.password`, `spam.spamassassin.host`, `.port`, `.user`).
+- **Spam providers, found at run time** (`us.bringardner.parley.smtp.spam`): after a message from outside is received
+  (with its SPF/DKIM/DMARC results already in the headers) and before it is accepted, the SMTP server asks a spam
+  scanner for a `SpamVerdict` (score, spam or not, the scanner's own action, the rules that matched).
+  - **The API**: a `SpamProvider` describes a kind of scanner (`getId`, `getTitle`, `getDescription`, `getFeatures`:
+    `CHECK`, `LEARN`, `STATUS`; `getSettings`, the same `ConnectionSetting`s FileSource connections use, with kinds,
+    defaults, choices, secrets and advanced settings; `validate`) and makes a `SpamFilter` (`check`, `learn(request,
+    spam)`, `status()` giving a `SpamStatus`: reachable, version, message).
+  - **Discovery** is as FileSourceFactory's (parley-core's `Plugins`): `SpamProviders` finds the classes listed in
+    `META-INF/services/us.bringardner.parley.smtp.spam.SpamProvider` in the class path and the plugin folders, and
+    `SpamProviders.register` adds one by code. No provider is known by name: this module's own `none`, `rspamd` and
+    `spamassassin` are listed in its services file like any plug-in. `SpamProviders.test` asks a provider's scanner
+    whether it answers with a form's settings.
+  - **Providers included**: `none` (checks nothing); `rspamd` (`/checkv2`; learning through its controller; `/ping`
+    for the status and version); `spamassassin` (spamd SYMBOLS; learning with TELL, which needs spamd's
+    `--allow-tell`; PING for the status).
+  - **Settings are the SMTP server's own** (`spam.*` under its prefix, `parley.mail.smtp.spam.*`; only the server that
+    receives mail from other servers checks): `enabled` (default false), `provider` (default `none`),
+    `rejectScore` / `quarantineScore` (when set, the score decides; otherwise the provider's action, or Junk for what it
+    calls spam), `maxSize` (2 MB), `timeoutMillis` (5000) and `<id>.<key>` for each provider's own (`rspamd.url`,
+    `rspamd.password`, `rspamd.controllerUrl`, `spamassassin.host`, `.port`, `.user`). They are read when the server
+    starts; settings that are wrong are logged and the earlier ones kept.
+  - **Per-domain overrides are the queue's** (`spam.domains` in `queue.properties`, `example.com:off,other.org:rspamd`:
+    a recipient domain's own choice, which also works when checking is off for the rest), and are read again by a reload
+    of the queue, so the Domains page applies them at once.
   - A message is refused (550 5.7.1), deferred (451 4.7.1), delivered to Junk, or accepted with `X-Spam-Flag`,
     `X-Spam-Score`, `X-Spam-Status` and `X-Spam-Checker` (the sender's own fields of those names are removed). Recipients
-    with different filters are checked once per filter and the mildest outcome wins. A filter that fails or is slow never
-    stops mail: it is accepted unscored and the failure is logged. Mail from relay clients is not checked.
-  - The settings are read again by a reload of the queue, so the web administration applies them without a restart.
+    with different providers are checked once per provider and the mildest outcome wins. A provider that fails or is slow
+    never stops mail: it is accepted unscored and the failure is logged. Mail from relay clients is not checked.
 - **Checks of the client before any mail** (relay ports; all off by default, skipped for clients that may relay by
   a trusted network or a login), settings under the server's prefix:
   - `dnsbl.zones` (comma separated): a connecting address listed in a DNS block list gets `554 5.7.1` and is

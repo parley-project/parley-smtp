@@ -7,29 +7,35 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
+
+import us.bringardner.parley.files.ConnectionSetting;
 
 import us.bringardner.parley.smtp.spam.SpamVerdict.Action;
 
 /**
- * The spam settings of a queue and the check the SMTP server makes with them. It is the one place
- * that knows which {@link SpamFilter} applies to which recipient; the filters only score.
+ * The spam settings of an SMTP server and the check it makes with them. It is the one place that
+ * knows which {@link SpamFilter} applies to which recipient; the filters only score. Which providers
+ * exist is not known here: {@link SpamProviders} finds them.
  * <p>
- * Settings (in the queue's {@code queue.properties}):
+ * Settings of the SMTP server (in its settings under its prefix, {@code parley.mail.smtp.spam.*}; only the
+ * server that receives mail from other servers checks for spam):
  * <ul>
- * <li>{@code spam.enabled} (default false) and {@code spam.provider} (a filter id, default
- * {@value NullSpamFilter#ID}): the filter for every domain without an override;</li>
- * <li>{@code spam.domains}: overrides by recipient domain, {@code example.com:off,other.org:rspamd}
- * ({@code off}, or the id of the filter to use there, even when spam checking is off for the rest);</li>
- * <li>{@code spam.rejectScore}, {@code spam.quarantineScore}: when set, the score decides (reject,
+ * <li>{@code enabled} (default false) and {@code provider} (a provider id, default
+ * {@value NullSpamFilter#ID}): the provider for every domain without an override;</li>
+ * <li>{@code rejectScore}, {@code quarantineScore}: when set, the score decides (reject,
  * Junk, or accept below both) and the filter's own action is ignored; when neither is set the
  * filter's action decides, or Junk for a message it calls spam if it has no action;</li>
- * <li>{@code spam.maxSize} (bytes, default 2 MB; larger messages are not checked),
- * {@code spam.timeoutMillis} (default 5000);</li>
- * <li>{@code spam.<id>.<option>}: the settings of each filter (see {@link SpamFilterFactory#options()}).</li>
+ * <li>{@code maxSize} (bytes, default 2 MB; larger messages are not checked),
+ * {@code timeoutMillis} (default 5000);</li>
+ * <li>{@code <id>.<key>}: the settings of each provider (see {@link SpamProvider#getSettings()}).</li>
  * </ul>
+ * The overrides by recipient domain are the queue's ({@code spam.domains} in its {@code queue.properties},
+ * {@code example.com:off,other.org:rspamd}: {@code off}, or the id of the provider to use there, even
+ * when spam checking is off for the rest), since domains belong to the queue.
+ * <p>
  * A message for recipients with different filters is checked once per filter, each with its own
  * recipients, and the mildest outcome wins (the message can't be refused for some recipients and
  * accepted for others), so a domain that isn't checked keeps the mail of the others from being refused.
@@ -69,7 +75,6 @@ public final class Spam {
 	private volatile Double quarantineScore;
 	private volatile long maxSize = 2 * 1024 * 1024;
 	private volatile int timeoutMillis = 5000;
-	private volatile Map<String, String> domains = Collections.emptyMap();
 	private volatile Map<String, Map<String, String>> options = Collections.emptyMap();
 	private final Map<String, SpamFilter> filters = new ConcurrentHashMap<>();
 	private volatile BiConsumer<String, Throwable> log = (m, e) -> {
@@ -78,39 +83,53 @@ public final class Spam {
 	// ------------------------------------------------------------------ settings
 
 	/**
-	 * Read the settings from the queue's properties (blank values are not set).
+	 * Read the settings (blank values are not set).
 	 *
-	 * @throws IllegalArgumentException if a number or the domain list is wrong
+	 * @param setting a setting of the server by its name after {@code spam.} ("enabled", "rspamd.url"), or null
+	 * @throws IllegalArgumentException if a number is wrong, the provider is not known, or its settings are wrong
 	 */
-	public void configure(Properties q) {
-		enabled = Boolean.parseBoolean(get(q, "spam.enabled", "false"));
-		provider = get(q, "spam.provider", NullSpamFilter.ID).toLowerCase(Locale.ROOT);
-		rejectScore = number(q, "spam.rejectScore");
-		quarantineScore = number(q, "spam.quarantineScore");
-		maxSize = Long.parseLong(get(q, "spam.maxSize", "2097152"));
-		timeoutMillis = Integer.parseInt(get(q, "spam.timeoutMillis", "5000"));
-		domains = parseDomains(get(q, "spam.domains", ""));
+	public void configure(Function<String, String> setting) {
+		boolean en = Boolean.parseBoolean(get(setting, "enabled", "false"));
+		String prov = get(setting, "provider", NullSpamFilter.ID).toLowerCase(Locale.ROOT);
+		Double reject = number(setting, "rejectScore");
+		Double quarantine = number(setting, "quarantineScore");
+		long max = Long.parseLong(get(setting, "maxSize", "2097152"));
+		int timeout = Integer.parseInt(get(setting, "timeoutMillis", "5000"));
 		Map<String, Map<String, String>> o = new LinkedHashMap<>();
-		for (SpamFilterFactory f : SpamFilters.factories()) {
+		for (SpamProvider p : SpamProviders.all()) {
 			Map<String, String> m = new LinkedHashMap<>();
-			for (SpamOption opt : f.options()) {
-				String v = q.getProperty("spam." + f.id() + "." + opt.getKey());
+			for (ConnectionSetting cs : p.getSettings()) {
+				String v = setting.apply(p.getId() + "." + cs.key());
 				if (v != null && !v.trim().isEmpty()) {
-					m.put(opt.getKey(), v.trim());
+					m.put(cs.key(), v.trim());
 				}
 			}
-			o.put(f.id(), m);
+			o.put(p.getId(), m);
 		}
+		SpamProvider chosen = SpamProviders.get(prov);
+		if (chosen == null) {
+			throw new IllegalArgumentException("spam.provider '" + prov + "' is not a spam provider (" + SpamProviders.ids() + ")");
+		}
+		List<String> problems = chosen.validate(o.get(chosen.getId()));
+		if (!problems.isEmpty()) {
+			throw new IllegalArgumentException("spam." + prov + ": " + String.join("; ", problems));
+		}
+		enabled = en;
+		provider = prov;
+		rejectScore = reject;
+		quarantineScore = quarantine;
+		maxSize = max;
+		timeoutMillis = timeout;
 		options = o;
 		closeFilters();
 	}
 
-	private static String get(Properties q, String key, String def) {
-		String v = q.getProperty(key);
+	private static String get(Function<String, String> q, String key, String def) {
+		String v = q.apply(key);
 		return v == null || v.trim().isEmpty() ? def : v.trim();
 	}
 
-	private static Double number(Properties q, String key) {
+	private static Double number(Function<String, String> q, String key) {
 		String v = get(q, key, null);
 		return v == null ? null : Double.valueOf(v);
 	}
@@ -166,15 +185,6 @@ public final class Spam {
 		this.provider = provider.trim().toLowerCase(Locale.ROOT);
 	}
 
-	/** The overrides: lower case domain to "off" or a filter id. */
-	public Map<String, String> getDomains() {
-		return domains;
-	}
-
-	public void setDomains(Map<String, String> domains) {
-		this.domains = new LinkedHashMap<>(domains);
-	}
-
 	/** Messages at or above this score are refused (null: not used). */
 	public void setRejectScore(Double score) {
 		this.rejectScore = score;
@@ -189,7 +199,7 @@ public final class Spam {
 		this.maxSize = maxSize;
 	}
 
-	/** The settings of a filter, as {@link SpamFilterFactory#create} gets them (without the timeout). */
+	/** The settings of a filter, as {@link SpamProvider#create} gets them (without the timeout). */
 	public void setOptions(String id, Map<String, String> settings) {
 		Map<String, Map<String, String>> o = new LinkedHashMap<>(options);
 		o.put(id, new LinkedHashMap<>(settings));
@@ -199,8 +209,12 @@ public final class Spam {
 
 	// ------------------------------------------------------------------ the check
 
-	/** The filter id that applies to mail for a domain, or {@value NullSpamFilter#ID}. */
-	public String providerFor(String domain) {
+	/**
+	 * The provider id that applies to mail for a domain, or {@value NullSpamFilter#ID}.
+	 *
+	 * @param domains the overrides ({@link #parseDomains})
+	 */
+	public String providerFor(String domain, Map<String, String> domains) {
 		String o = domains.get(domain.toLowerCase(Locale.ROOT));
 		if (o != null) {
 			return o.equals(OFF) ? NullSpamFilter.ID : o;
@@ -209,7 +223,7 @@ public final class Spam {
 	}
 
 	/** True if any mail can be checked: spam checking is on, or some domain turns a filter on. */
-	public boolean isActive() {
+	public boolean isActive(Map<String, String> domains) {
 		if (enabled && !NullSpamFilter.ID.equals(provider)) {
 			return true;
 		}
@@ -224,13 +238,14 @@ public final class Spam {
 	/**
 	 * Check a message. Never throws: a filter that fails counts as accepting the message.
 	 *
+	 * @param domains the queue's overrides by recipient domain ({@link #parseDomains})
 	 * @return what to do with it (never null)
 	 */
-	public Outcome check(SpamRequest request) {
+	public Outcome check(SpamRequest request, Map<String, String> domains) {
 		Map<String, List<String>> groups = new LinkedHashMap<>();
 		boolean unchecked = false;
 		for (String rcpt : request.getRecipients()) {
-			String id = providerFor(rcpt.substring(rcpt.lastIndexOf('@') + 1));
+			String id = providerFor(rcpt.substring(rcpt.lastIndexOf('@') + 1), domains);
 			if (id.equals(NullSpamFilter.ID)) {
 				unchecked = true;
 			} else {
@@ -296,17 +311,22 @@ public final class Spam {
 		return v.isSpam() ? Action.QUARANTINE : Action.ACCEPT;
 	}
 
+	/** The filter of the provider with the id, made on first use (to learn, or ask its status). */
+	public SpamFilter getFilter(String id) throws IOException {
+		return filter(id);
+	}
+
 	private SpamFilter filter(String id) throws IOException {
 		SpamFilter f = filters.get(id);
 		if (f != null) {
 			return f;
 		}
-		SpamFilterFactory factory = SpamFilters.factory(id);
+		SpamProvider factory = SpamProviders.get(id);
 		if (factory == null) {
-			throw new IOException("Unknown spam filter '" + id + "'");
+			throw new IOException("Unknown spam provider '" + id + "'");
 		}
 		Map<String, String> settings = new LinkedHashMap<>(options.getOrDefault(id, Collections.emptyMap()));
-		settings.put("timeoutMillis", String.valueOf(timeoutMillis));
+		settings.put(SpamProvider.TIMEOUT_MILLIS, String.valueOf(timeoutMillis));
 		f = factory.create(settings);
 		SpamFilter prior = filters.putIfAbsent(id, f);
 		if (prior != null) {
