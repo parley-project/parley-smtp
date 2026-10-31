@@ -16,7 +16,6 @@ import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dkim.Dkim;
 import us.bringardner.parley.smtp.dkim.DkimSigner;
 import us.bringardner.parley.smtp.dmarc.Dmarc;
-import us.bringardner.parley.smtp.spam.Spam;
 import us.bringardner.parley.smtp.spf.Spf;
 
 /** How the queue delivers mail: local domains and users, routing, retries. */
@@ -26,7 +25,7 @@ public class DeliveryConfig {
 	private final Spf spf = new Spf();
 	private final Dmarc dmarc = new Dmarc();
 	private final Arc arc = new Arc();
-	private final Spam spam = new Spam();
+	private volatile Map<String, String> spamDomains = java.util.Collections.emptyMap();
 
 	/** TLS for outgoing connections. */
 	public enum TlsMode {
@@ -411,8 +410,15 @@ public class DeliveryConfig {
 		return spf;
 	}
 
-	/** The spam filters and which one applies to which domain (the queue's settings). */
-	public Spam getSpam() {
-		return spam;
+	/**
+	 * The spam overrides by recipient domain (lower case domain to "off" or a spam provider id), from the
+	 * queue's {@code spam.domains}; which provider is the default, and its settings, are the SMTP server's.
+	 */
+	public Map<String, String> getSpamDomains() {
+		return spamDomains;
+	}
+
+	public void setSpamDomains(Map<String, String> domains) {
+		this.spamDomains = java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(domains));
 	}
 }

@@ -100,6 +100,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private volatile int timeout = 5 * 60 * 1000;
 	private volatile int maxHops = 100;
 	private final ConnectionChecks connectionChecks = new ConnectionChecks();
+	private final us.bringardner.parley.smtp.spam.Spam spam = new us.bringardner.parley.smtp.spam.Spam();
 	/** this server's queue: a directory under the maildrop root */
 	private volatile String queueLocation = QUEUE_DIRECTORY;
 	//  Replaced (not changed) when a network is added, so isRelayAllowed needs no lock
@@ -252,6 +253,20 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		connectionChecks.setMaxConcurrentPerAddress(setting("rate.maxConcurrent", 0));
 		connectionChecks.setMaxMessagesPerMinute(setting("rate.messagesPerMinute", 0));
 		connectionChecks.setMaxRecipientsPerMinute(setting("rate.recipientsPerMinute", 0));
+
+		// the spam provider (spam.*): the provider and its settings are this server's, the per-domain overrides the queue's
+		spam.setLog((m, e) -> {
+			if (e == null) {
+				logInfo(m);
+			} else {
+				logError(m, e);
+			}
+		});
+		try {
+			spam.configure(n -> setting("spam." + n));
+		} catch (RuntimeException e) {
+			logError("Wrong spam settings (" + propertyName("spam.*") + "): " + e.getMessage() + "; spam checking keeps its earlier settings", e);
+		}
 	}
 
 	/** A queue setting, or null */
@@ -351,14 +366,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (tmp != null) {
 			c.setRelayTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
 		}
-		c.getSpam().setLog((m, e) -> {
-			if (e == null) {
-				logInfo(m);
-			} else {
-				logError(m, e);
-			}
-		});
-		c.getSpam().configure(q);
+		c.setSpamDomains(us.bringardner.parley.smtp.spam.Spam.parseDomains(queueSetting(q, "spam.domains") == null ? "" : queueSetting(q, "spam.domains")));
 		tmp = queueSetting(q, "tls");
 		if (tmp != null) {
 			c.setTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
@@ -518,20 +526,21 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (shared != null && !signed.contains(shared.toLowerCase(Locale.ROOT))) {
 			throw new IOException("The shared DKIM key's domain " + shared + " has no key in dkim.keys" + where);
 		}
+		java.util.Map<String, String> spamDomains;
 		try {
-			new us.bringardner.parley.smtp.spam.Spam().configure(q); // wrong settings change nothing
+			spamDomains = us.bringardner.parley.smtp.spam.Spam.parseDomains(queueSetting(q, "spam.domains") == null ? "" : queueSetting(q, "spam.domains")); // wrong settings change nothing
 		} catch (RuntimeException e) {
 			throw new IOException("Wrong spam settings" + where + ": " + e.getMessage(), e);
 		}
 		DeliveryConfig c = getQueue().getConfig();
 		// the aliases and keys before the domains: a new domain is local only once they are there
 		c.setAliases(aliasMap);
-		c.getSpam().configure(q);
+		c.setSpamDomains(spamDomains);
 		c.getDkim().setSigners(signers);
 		c.getDkim().setShared(shared);
 		c.setLocalDomains(domainList);
 		String msg = "Mail queue settings read again" + where + ": domains " + c.getLocalDomains() + ", " + aliasMap.size()
-				+ " aliases, DKIM keys for " + signed + (shared == null ? "" : ", shared key " + shared) + ", spam filters";
+				+ " aliases, DKIM keys for " + signed + (shared == null ? "" : ", shared key " + shared) + ", spam overrides for " + spamDomains.size() + " domains";
 		logInfo(msg);
 		return msg;
 	}
@@ -734,6 +743,11 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/** The checks of a client before any mail: block lists, reverse DNS, HELO, pregreet, rates (this port's own). */
+	/** The spam provider settings and check of this server. */
+	public us.bringardner.parley.smtp.spam.Spam getSpam() {
+		return spam;
+	}
+
 	public ConnectionChecks getConnectionChecks() {
 		return connectionChecks;
 	}

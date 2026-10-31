@@ -1,0 +1,3 @@
+us.bringardner.parley.smtp.spam.NullSpamFilter$Provider
+us.bringardner.parley.smtp.spam.RspamdSpamFilter$Provider
+us.bringardner.parley.smtp.spam.SpamAssassinSpamFilter$Provider
