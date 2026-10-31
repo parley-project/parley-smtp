@@ -351,6 +351,14 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (tmp != null) {
 			c.setRelayTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
 		}
+		c.getSpam().setLog((m, e) -> {
+			if (e == null) {
+				logInfo(m);
+			} else {
+				logError(m, e);
+			}
+		});
+		c.getSpam().configure(q);
 		tmp = queueSetting(q, "tls");
 		if (tmp != null) {
 			c.setTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
@@ -467,7 +475,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/**
-	 * Read the queue's domains, aliases file and DKIM keys again ({@link MailQueue#reload()}) and use
+	 * Read the queue's domains, aliases file, DKIM keys and spam settings again ({@link MailQueue#reload()}) and use
 	 * them at once; a mail being received or delivered sees the old ones or the new ones. Every one is
 	 * read before any is used, so nothing changes when one can't be read.
 	 */
@@ -510,14 +518,20 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (shared != null && !signed.contains(shared.toLowerCase(Locale.ROOT))) {
 			throw new IOException("The shared DKIM key's domain " + shared + " has no key in dkim.keys" + where);
 		}
+		try {
+			new us.bringardner.parley.smtp.spam.Spam().configure(q); // wrong settings change nothing
+		} catch (RuntimeException e) {
+			throw new IOException("Wrong spam settings" + where + ": " + e.getMessage(), e);
+		}
 		DeliveryConfig c = getQueue().getConfig();
 		// the aliases and keys before the domains: a new domain is local only once they are there
 		c.setAliases(aliasMap);
+		c.getSpam().configure(q);
 		c.getDkim().setSigners(signers);
 		c.getDkim().setShared(shared);
 		c.setLocalDomains(domainList);
 		String msg = "Mail queue settings read again" + where + ": domains " + c.getLocalDomains() + ", " + aliasMap.size()
-				+ " aliases, DKIM keys for " + signed + (shared == null ? "" : ", shared key " + shared);
+				+ " aliases, DKIM keys for " + signed + (shared == null ? "" : ", shared key " + shared) + ", spam filters";
 		logInfo(msg);
 		return msg;
 	}

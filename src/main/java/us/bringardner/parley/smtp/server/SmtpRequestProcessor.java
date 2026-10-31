@@ -40,6 +40,9 @@ import us.bringardner.parley.smtp.queue.QueuedRecipient;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.dmarc.DmarcRecord;
 import us.bringardner.parley.smtp.dmarc.DmarcResult;
+import us.bringardner.parley.smtp.spam.Spam;
+import us.bringardner.parley.smtp.spam.SpamRequest;
+import us.bringardner.parley.smtp.spam.SpamVerdict;
 import us.bringardner.parley.smtp.spf.Spf;
 import us.bringardner.parley.smtp.spf.SpfResult;
 import us.bringardner.parley.io.IoUtils;
@@ -741,6 +744,22 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 				return;
 			}
 			quarantine = applied == DmarcRecord.Policy.QUARANTINE;
+			Spam.Outcome spam = checkSpam(t);
+			if (spam.action == SpamVerdict.Action.REJECT) {
+				abortTransaction();
+				reply(MAILBOX_UNAVAILABLE, "5.7.1", spam.text);
+				return;
+			}
+			if (spam.action == SpamVerdict.Action.DEFER) {
+				abortTransaction();
+				reply(LOCAL_ERROR, "4.7.1", spam.text);
+				return;
+			}
+			if (!spam.headers.isEmpty()) {
+				HeaderRewriter.insertAfterFirst(t.incoming, getQueue().incoming(t.id + "s"), spam.headers,
+						f -> Spam.isSpamHeader(f.getName()));
+			}
+			quarantine |= spam.action == SpamVerdict.Action.QUARANTINE;
 		}
 		QueueEntry e = new QueueEntry(t.id);
 		e.setQuarantine(quarantine);
@@ -784,6 +803,22 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			logError("SPF check failed", e);
 			return null;
 		}
+	}
+
+	/** The spam check of a message from outside (see {@link Spam}); {@link Spam.Outcome#NONE} if no filter applies. */
+	private Spam.Outcome checkSpam(Transaction t) throws IOException {
+		Spam spam = getQueue().getConfig().getSpam();
+		if (!spam.isActive()) {
+			return Spam.Outcome.NONE;
+		}
+		List<String> rcpts = new ArrayList<>();
+		for (QueuedRecipient r : t.recipients) {
+			rcpts.add(r.getAddress().getLocalPart() + "@" + r.getAddress().getAsciiDomain());
+		}
+		String from = t.from == null ? "" : t.from.getLocalPart() + "@" + t.from.getAsciiDomain();
+		FileSource incoming = t.incoming;
+		return spam.check(new SpamRequest(getClientAddress(), helo, from, rcpts, null, getSmtpServer().getHostname(), t.id,
+				incoming.length(), incoming::getInputStream));
 	}
 
 	/**

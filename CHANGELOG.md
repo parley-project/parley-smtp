@@ -23,6 +23,22 @@
     `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
 
 ### Added
+- **Spam filters, pluggable** (`us.bringardner.parley.smtp.spam`): after a message from outside is received (with its
+  SPF/DKIM/DMARC results already in the headers) and before it is accepted, the server asks a `SpamFilter` for a
+  `SpamVerdict` (score, spam or not, the filter's own action, the rules that matched). Three filters are included:
+  `none` (checks nothing), `rspamd` (its HTTP API, `/checkv2`) and `spamassassin` (spamd, SYMBOLS). Another filter is
+  a `SpamFilterFactory` listed in `META-INF/services` or given to `SpamFilters.register`; it describes its settings
+  (`SpamOption`) so the web administration offers them.
+  - Queue settings: `spam.enabled` (default false), `spam.provider` (default `none`), `spam.domains`
+    (`example.com:off,other.org:rspamd`: a recipient domain's own choice, which also works when checking is off for the
+    rest), `spam.rejectScore` / `spam.quarantineScore` (when set, the score decides; otherwise the filter's action, or
+    Junk for what it calls spam), `spam.maxSize` (2 MB), `spam.timeoutMillis` (5000) and `spam.<id>.<option>`
+    (`spam.rspamd.url`, `spam.rspamd.password`, `spam.spamassassin.host`, `.port`, `.user`).
+  - A message is refused (550 5.7.1), deferred (451 4.7.1), delivered to Junk, or accepted with `X-Spam-Flag`,
+    `X-Spam-Score`, `X-Spam-Status` and `X-Spam-Checker` (the sender's own fields of those names are removed). Recipients
+    with different filters are checked once per filter and the mildest outcome wins. A filter that fails or is slow never
+    stops mail: it is accepted unscored and the failure is logged. Mail from relay clients is not checked.
+  - The settings are read again by a reload of the queue, so the web administration applies them without a restart.
 - **Checks of the client before any mail** (relay ports; all off by default, skipped for clients that may relay by
   a trusted network or a login), settings under the server's prefix:
   - `dnsbl.zones` (comma separated): a connecting address listed in a DNS block list gets `554 5.7.1` and is
