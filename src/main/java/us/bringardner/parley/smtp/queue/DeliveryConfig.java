@@ -16,6 +16,7 @@ import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dkim.Dkim;
 import us.bringardner.parley.smtp.dkim.DkimSigner;
 import us.bringardner.parley.smtp.dmarc.Dmarc;
+import us.bringardner.parley.smtp.spam.Spam;
 import us.bringardner.parley.smtp.spf.Spf;
 
 /** How the queue delivers mail: local domains and users, routing, retries. */
@@ -25,6 +26,7 @@ public class DeliveryConfig {
 	private final Spf spf = new Spf();
 	private final Dmarc dmarc = new Dmarc();
 	private final Arc arc = new Arc();
+	private final Spam spam = new Spam();
 
 	/** TLS for outgoing connections. */
 	public enum TlsMode {
@@ -407,5 +409,10 @@ public class DeliveryConfig {
 	/** SPF checking settings (RFC 7208). */
 	public Spf getSpf() {
 		return spf;
+	}
+
+	/** The spam filters and which one applies to which domain (the queue's settings). */
+	public Spam getSpam() {
+		return spam;
 	}
 }
