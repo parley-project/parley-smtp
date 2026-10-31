@@ -29,6 +29,7 @@ import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.SmtpInput;
 import us.bringardner.parley.smtp.SmtpStreams;
+import us.bringardner.parley.smtp.abuse.ConnectionChecks;
 import us.bringardner.parley.smtp.dkim.ArcResult;
 import us.bringardner.parley.smtp.dkim.DkimResult;
 import us.bringardner.parley.smtp.dkim.HeaderFields;
@@ -96,6 +97,10 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	private Transaction transaction;
 	private int errors;
 	private volatile boolean closing;
+	/** The connection is counted in the per-address limits ({@link ConnectionChecks#enter}) */
+	private boolean counted;
+	private boolean reverseDnsChecked;
+	private ConnectionChecks.Refusal reverseDnsRefusal;
 
 	public SmtpRequestProcessor() {
 		super();
@@ -116,6 +121,9 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		IConnection con = getConnection();
 		try {
 			openStreams();
+			if (!admit()) {
+				return;
+			}
 			reply(SERVICE_READY, null, getSmtpServer().getHostname() + " ESMTP Parley ready");
 			flush();
 			loop();
@@ -124,6 +132,9 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		} catch (Throwable e) {
 			logError("An error occurred in the SMTP session; closing the connection.", e);
 		} finally {
+			if (counted) {
+				getSmtpServer().getConnectionChecks().leave(getClientAddress());
+			}
 			abortTransaction();
 			running = false;
 			try {
@@ -201,6 +212,125 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			logError("Error in " + verb, e);
 			reply(LOCAL_ERROR, "4.3.0", "Local error in processing; try again later");
 		}
+	}
+
+	// ------------------------------------------------------------------ checks of the client
+
+	private us.bringardner.parley.smtp.spf.SpfDns dns() {
+		return getSmtpServer().getDeliveryConfig().getSpf().getDns();
+	}
+
+	/**
+	 * The checks made when a client connects: the limits per address, the block lists and the pregreet
+	 * wait. Skipped for clients that may relay; the block lists and pregreet are also skipped on a
+	 * submission port (its clients are users at home, who are often on a list).
+	 *
+	 * @return false if the client was refused (the reply is sent and the session ends)
+	 */
+	private boolean admit() throws IOException {
+		if (mayRelay()) {
+			return true;
+		}
+		SmtpServer server = getSmtpServer();
+		ConnectionChecks cc = server.getConnectionChecks();
+		InetAddress ip = getClientAddress();
+		counted = true;
+		ConnectionChecks.Refusal r = cc.enter(ip);
+		if (r == null && !server.isSubmission()) {
+			r = cc.checkBlockList(ip, dns());
+			if (r == null && cc.getPregreetMillis() > 0 && !isTls()) {
+				r = waitForGreeting(cc);
+			}
+		}
+		return !refuse(r, true);
+	}
+
+	/** Wait for the pregreet time; the refusal if the client sends anything before our greeting. */
+	private ConnectionChecks.Refusal waitForGreeting(ConnectionChecks cc) throws IOException {
+		InputStream raw = getConnection().getSocket().getInputStream();
+		long end = System.currentTimeMillis() + cc.getPregreetMillis();
+		while (true) {
+			if (raw.available() > 0 || in.hasBuffered()) {
+				return cc.pregreet();
+			}
+			long left = end - System.currentTimeMillis();
+			if (left <= 0) {
+				return null;
+			}
+			try {
+				Thread.sleep(Math.min(left, 50));
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return null;
+			}
+		}
+	}
+
+	/**
+	 * Act on a failed check: log it, and unless the checks only log, reply to the client.
+	 *
+	 * @param close end the session after the reply
+	 * @return true if the client was refused
+	 */
+	private boolean refuse(ConnectionChecks.Refusal r, boolean close) throws IOException {
+		if (r == null) {
+			return false;
+		}
+		ConnectionChecks cc = getSmtpServer().getConnectionChecks();
+		logInfo((cc.isLogOnly() ? "Would refuse " : "Refused ") + getClientAddress().getHostAddress() + " (" + r + ")");
+		if (cc.isLogOnly()) {
+			return false;
+		}
+		if (close) {
+			reply(r.code, r.enhanced, r.text);
+			flush();
+			closing = true;
+		} else {
+			error(r.code, r.enhanced, r.text);
+		}
+		return true;
+	}
+
+	/**
+	 * Checks at MAIL: the rate of messages from the address and, on a relay port, the reverse DNS of
+	 * the client (asked once per session). Skipped for clients that may relay.
+	 *
+	 * @return true if the client was refused (the reply is sent)
+	 */
+	public boolean mailRefused() throws IOException {
+		if (mayRelay()) {
+			return false;
+		}
+		ConnectionChecks cc = getSmtpServer().getConnectionChecks();
+		ConnectionChecks.Refusal r = cc.checkMessageRate(getClientAddress());
+		if (r == null && !getSmtpServer().isSubmission()) {
+			if (!reverseDnsChecked) {
+				reverseDnsChecked = true;
+				try {
+					reverseDnsRefusal = cc.checkReverseDns(getClientAddress(), dns());
+				} catch (RuntimeException e) {
+					logError("Reverse DNS check of " + getClientAddress().getHostAddress() + " failed", e);
+				}
+			}
+			r = reverseDnsRefusal;
+		}
+		return refuse(r, false);
+	}
+
+	/** Check at RCPT: the rate of recipients from the address. Skipped for clients that may relay. */
+	public boolean recipientRefused() throws IOException {
+		return !mayRelay() && refuse(getSmtpServer().getConnectionChecks().checkRecipientRate(getClientAddress()), false);
+	}
+
+	/** Check at HELO/EHLO: the name the client gives. Skipped for clients that may relay and on a submission port. */
+	public boolean heloRefused(String name) throws IOException {
+		SmtpServer server = getSmtpServer();
+		if (mayRelay() || server.isSubmission()) {
+			return false;
+		}
+		List<String> own = new ArrayList<>(server.getDeliveryConfig().getLocalDomains());
+		own.add(server.getHostname());
+		return refuse(server.getConnectionChecks().checkHelo(name, own), false);
 	}
 
 	/** Reply with an error, closing the connection after too many. */

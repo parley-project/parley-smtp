@@ -44,6 +44,9 @@ public class Rcpt extends BaseCommand {
 			p.reply(INSUFFICIENT_STORAGE, "4.5.3", "Too many recipients");
 			return;
 		}
+		if (p.recipientRefused()) {
+			return;
+		}
 		String rest = args.substring(3).trim();
 		MailPath path;
 		if (rest.regionMatches(true, 0, "<postmaster>", 0, 12)) {

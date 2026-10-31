@@ -23,6 +23,19 @@
     `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
 
 ### Added
+- **Checks of the client before any mail** (relay ports; all off by default, skipped for clients that may relay by
+  a trusted network or a login), settings under the server's prefix:
+  - `dnsbl.zones` (comma separated): a connecting address listed in a DNS block list gets `554 5.7.1` and is
+    disconnected. Private addresses are never asked; `127.255.255.x` answers (a refused query) and DNS failures
+    are not listings; answers are kept for 10 minutes. Not made on a submission port.
+  - `rdns.require`: MAIL is answered `450 4.7.25` if the client address has no PTR name that resolves back to it.
+  - `helo.check`: HELO/EHLO is answered `550 5.7.1` for a name that is not fully qualified (or an address literal)
+    or that is this server's name or one of its domains.
+  - `pregreet.millis`: wait this long before the greeting; a client that sends first gets `554 5.5.0`.
+  - `rate.connectionsPerMinute`, `rate.maxConcurrent` (`421 4.7.0` at connect), `rate.messagesPerMinute` (MAIL) and
+    `rate.recipientsPerMinute` (RCPT) (`450 4.7.1`), per client address.
+  - `checks.logOnly`: report what would be refused without refusing, to try a rule on live mail first.
+  `SmtpServer.getConnectionChecks()` gives the same settings to code (`us.bringardner.parley.smtp.abuse`).
 - **`historyFileSource`** (queue setting): the file system the history's folder is on, a FileSource type id such as `FileProxy`
   for local disk; default the mail root's. It needs `historyDirectory` unless it is the mail root's own type.
   `QueueHistory.folder(mailRoot, fileSource, directory)` finds the folder, for an application that reads the history.

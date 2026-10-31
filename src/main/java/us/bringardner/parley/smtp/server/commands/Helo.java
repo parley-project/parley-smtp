@@ -20,6 +20,9 @@ public class Helo extends BaseCommand {
 			p.error(PARAMETER_ERROR, "5.5.4", "Syntax: HELO hostname");
 			return;
 		}
+		if (p.heloRefused(name)) {
+			return;
+		}
 		p.hello(name, false);
 		p.reply(OK, null, p.getSmtpServer().getHostname());
 	}
