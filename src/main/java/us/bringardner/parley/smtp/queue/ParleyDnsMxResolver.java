@@ -35,7 +35,7 @@ import us.bringardner.parley.dns.resolve.Resolver;
  * <li><b>stub</b> (default): ask recursive DNS servers ({@code /etc/resolv.conf}
  * or a list you give), trying each in turn;</li>
  * <li><b>iterative</b>: parley-dns's own {@link Resolver}, which starts at the root
- * servers in its {@code sbelt.prop} and caches answers.</li>
+ * servers in its {@code root.hints} and caches answers.</li>
  * </ul>
  * Rules: MX records by preference (random among equals); the domain's own
  * address when there is no MX ("implicit MX"); RFC 7505 null MX ("0 .") and
@@ -80,7 +80,7 @@ public class ParleyDnsMxResolver implements MxResolver {
 	/**
 	 * Iterative mode: parley-dns's own resolver (started once per process with
 	 * {@link Resolver#initResolver()}, which reads its root servers from
-	 * {@code sbelt.prop} in the parley-dns directory).
+	 * {@code root.hints} in the parley-dns directory).
 	 */
 	public static synchronized ParleyDnsMxResolver iterative() throws IOException {
 		if (!resolverStarted) {

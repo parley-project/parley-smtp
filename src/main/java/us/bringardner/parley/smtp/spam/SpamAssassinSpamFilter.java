@@ -70,7 +70,7 @@ public final class SpamAssassinSpamFilter implements SpamFilter {
 				throw new IllegalArgumentException(String.join("; ", problems));
 			}
 			int port = Integer.parseInt(settings.getOrDefault("port", "783").trim());
-			int timeout = Integer.parseInt(settings.getOrDefault(TIMEOUT_MILLIS, "5000").trim());
+			int timeout = us.bringardner.parley.core.util.Durations.toIntMillis(us.bringardner.parley.core.util.Durations.parse(settings.getOrDefault(TIMEOUT, "5s")));
 			return new SpamAssassinSpamFilter(settings.getOrDefault("host", "127.0.0.1").trim(), port,
 					settings.get("user"), timeout);
 		}

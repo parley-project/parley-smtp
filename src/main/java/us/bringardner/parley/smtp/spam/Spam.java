@@ -29,7 +29,7 @@ import us.bringardner.parley.smtp.spam.SpamVerdict.Action;
  * Junk, or accept below both) and the filter's own action is ignored; when neither is set the
  * filter's action decides, or Junk for a message it calls spam if it has no action;</li>
  * <li>{@code maxSize} (bytes, default 2 MB; larger messages are not checked),
- * {@code timeoutMillis} (default 5000);</li>
+ * {@code timeout} (a duration, default {@code 5s});</li>
  * <li>{@code <id>.<key>}: the settings of each provider (see {@link SpamProvider#getSettings()}).</li>
  * </ul>
  * The overrides by recipient domain are the queue's ({@code spam.domains} in its {@code queue.properties},
@@ -94,7 +94,7 @@ public final class Spam {
 		Double reject = number(setting, "rejectScore");
 		Double quarantine = number(setting, "quarantineScore");
 		long max = Long.parseLong(get(setting, "maxSize", "2097152"));
-		int timeout = Integer.parseInt(get(setting, "timeoutMillis", "5000"));
+		int timeout = us.bringardner.parley.core.util.Durations.toIntMillis(us.bringardner.parley.core.util.Durations.parse(get(setting, "timeout", "5s")));
 		Map<String, Map<String, String>> o = new LinkedHashMap<>();
 		for (SpamProvider p : SpamProviders.all()) {
 			Map<String, String> m = new LinkedHashMap<>();
@@ -197,6 +197,11 @@ public final class Spam {
 
 	public void setMaxSize(long maxSize) {
 		this.maxSize = maxSize;
+	}
+
+	/** The longest a call to the provider may take, in ms ({@code spam.timeout}) */
+	public int getTimeoutMillis() {
+		return timeoutMillis;
 	}
 
 	/** The settings of a filter, as {@link SpamProvider#create} gets them (without the timeout). */
@@ -326,7 +331,7 @@ public final class Spam {
 			throw new IOException("Unknown spam provider '" + id + "'");
 		}
 		Map<String, String> settings = new LinkedHashMap<>(options.getOrDefault(id, Collections.emptyMap()));
-		settings.put(SpamProvider.TIMEOUT_MILLIS, String.valueOf(timeoutMillis));
+		settings.put(SpamProvider.TIMEOUT, String.valueOf(timeoutMillis));
 		f = factory.create(settings);
 		SpamFilter prior = filters.putIfAbsent(id, f);
 		if (prior != null) {

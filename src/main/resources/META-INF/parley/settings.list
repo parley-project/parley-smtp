@@ -29,7 +29,7 @@ parley.mail.{smtp,submission,submissions}.spf.rejectFail
 parley.mail.{smtp,submission,submissions}.checks.logOnly
 parley.mail.{smtp,submission,submissions}.dnsbl.zones
 parley.mail.{smtp,submission,submissions}.helo.check
-parley.mail.{smtp,submission,submissions}.pregreet.millis
+parley.mail.{smtp,submission,submissions}.pregreet.delay
 parley.mail.{smtp,submission,submissions}.rdns.require
 parley.mail.{smtp,submission,submissions}.rate.connectionsPerMinute
 parley.mail.{smtp,submission,submissions}.rate.maxConcurrent
@@ -41,3 +41,11 @@ parley.mail.{smtp,submission,submissions}.spam.**
 
 # smtps, the relay with implicit TLS, was dropped in 2.0.0
 renamed parley.mail.smtps.port parley.mail.submissions.port
+
+# 2.0.0: durations carry their unit in the value (3s), not in the name
+renamed parley.mail.smtp.pregreet.millis parley.mail.smtp.pregreet.delay
+renamed parley.mail.submission.pregreet.millis parley.mail.submission.pregreet.delay
+renamed parley.mail.submissions.pregreet.millis parley.mail.submissions.pregreet.delay
+renamed parley.mail.smtp.spam.timeoutMillis parley.mail.smtp.spam.timeout
+renamed parley.mail.submission.spam.timeoutMillis parley.mail.submission.spam.timeout
+renamed parley.mail.submissions.spam.timeoutMillis parley.mail.submissions.spam.timeout

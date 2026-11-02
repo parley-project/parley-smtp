@@ -85,7 +85,7 @@ public final class RspamdSpamFilter implements SpamFilter {
 			if (!problems.isEmpty()) {
 				throw new IllegalArgumentException(String.join("; ", problems));
 			}
-			int timeout = Integer.parseInt(settings.getOrDefault(TIMEOUT_MILLIS, "5000").trim());
+			int timeout = us.bringardner.parley.core.util.Durations.toIntMillis(us.bringardner.parley.core.util.Durations.parse(settings.getOrDefault(TIMEOUT, "5s")));
 			return new RspamdSpamFilter(base(settings.get("url"), DEFAULT_URL), settings.get("password"),
 					base(settings.get("controllerUrl"), DEFAULT_CONTROLLER_URL), settings.get("controllerPassword"), timeout);
 		}

@@ -87,7 +87,7 @@ changes and `reload` says why. Restart a server to make it read the queue's othe
 "Queue settings" below), read by every server that uses the queue, so they can't disagree about
 how its mail is delivered. A queue without it isn't used and the server doesn't start: making it is
 an administrator's job (`MailQueue.writeSettings`). A secret it needs is never written in it: the
-smart host's `relayPassword` names where the password is kept (`@keychain:parley/smarthost`, from
+smart host's `smartHost.password` names where the password is kept (`@keychain:parley/smarthost`, from
 parley-credentials-keychain; `@file:/etc/parley/smarthost.secret` on a server without a desktop
 keychain; or `@env:NAME`).
 
@@ -138,14 +138,14 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
   - Two resolvers are included, chosen with `resolver`:
     - `jdk` (default): `DnsMxResolver`, the JDK's DNS provider.
     - `parley-dns`: `ParleyDnsMxResolver`, which makes every DNS request with parley-dns: the MX query and the A/AAAA lookups of the mail hosts. It asks the servers in `dnsServers` (comma-separated), or those in `/etc/resolv.conf`, in turn.
-    - `parley-dns-iterative`: parley-dns's own iterative resolver, which starts from the root servers in its `sbelt.prop`.
+    - `parley-dns-iterative`: parley-dns's own iterative resolver, which starts from the root servers in its `root.hints` (parley-dns).
     - Any other `MxResolver` can be set with `getDeliveryConfig().setResolver(...)`.
   - It tries hosts in order of preference, with opportunistic STARTTLS.
   - It uses SIZE, 8BITMIME, SMTPUTF8, CHUNKING/BINARYMIME and DSN when the message needs them. A message needing SMTPUTF8 is returned (5.6.7) by a server without it, as RFC 6531 requires.
-- **Smart host:** set the queue settings `relayHost=host:port` (with `relayUser`/`relayPassword`) to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`relayTls`).
-- **Retries:** temporary failures are retried on `retry` (minutes, default `1,5,15,30,60,120`).
-  - The sender gets a "delayed" notice after `delayWarningHours` (default 4).
-  - The message is returned after `maxAgeHours` (default 120).
+- **Smart host:** set the queue settings `smartHost=host` and `smartHost.port` (default 587), with `smartHost.user`/`smartHost.password`, to send all outgoing mail through your provider. Many home and cloud networks block outgoing port 25. The smart host requires TLS with a valid certificate (`smartHost.tls`).
+- **Retries:** temporary failures are retried on `retry` (durations, default `1m,5m,15m,30m,1h,2h`).
+  - The sender gets a "delayed" notice after `delayWarning` (default `4h`).
+  - The message is returned after `maxAge` (default `5d`).
 - **Several servers on one queue:** give them the same queue (the default) on a store whose settings say `sharing=host` or `cluster` (see parley-mail): in one process or several, they share it the same way.
   - Each delivery pass holds the message's lock in the store's lock domain (`queue/.smtp-queue/<id>`). A message another server is working on is skipped, not waited for.
   - A pass starts from the envelope as it is on disk, so no server repeats a delivery another made or overwrites its progress. A message another server finished is dropped.
@@ -232,7 +232,7 @@ Domains ask for reports with `rua=` (aggregate) and `ruf=` (failure) in their DM
 
 - **Aggregate reports** (`dmarc.aggregateReports=true`, RFC 7489 section 7.2):
   - Each evaluation is stored in `.dmarc-reports` under the maildrop root, so it survives restarts.
-  - Every `dmarc.reportIntervalHours` (default 24), each domain gets one XML report.
+  - Every `dmarc.reportInterval` (default `24h`), each domain gets one XML report.
   - Identical messages share a row, with a count. The `disposition` is what was actually done; a fail that wasn't enforced is marked `local_policy`, and a pct= downgrade `sampled_out`.
   - The XML is gzipped and mailed as `<org>!<domain>!<begin>!<end>.xml.gz`, with the subject `Report Domain: <domain> Submitter: <org> Report-ID: <id>`.
 - **Failure reports** (`dmarc.failureReports=true`, section 7.3):
@@ -274,7 +274,7 @@ There is no fallback from one prefix to another, and no setting is taken from an
 | `parley.mail.smtp.requireTls` | false | AUTH (and MAIL on submission ports) only after STARTTLS |
 | `parley.mail.smtp.maxMessageSize` | 52428800 | SIZE limit |
 | `parley.mail.smtp.maxRecipients` | 100 | Recipients per message |
-| `parley.mail.smtp.timeout` | 300000 ms | Idle session timeout (RFC 5321 requires at least 5 minutes) |
+| `parley.mail.smtp.timeout` | `5m` | Idle session timeout, a duration (RFC 5321 requires at least 5 minutes) |
 | `parley.mail.smtp.maxHops` | 100 | Received headers allowed before a message counts as a loop |
 | `parley.mail.smtp.dkim.verify` | true | Verify DKIM signatures of incoming mail and add Authentication-Results |
 | `parley.mail.smtp.spf.check` | true | Check SPF for incoming mail and add Received-SPF and Authentication-Results |
@@ -299,13 +299,13 @@ In `queue.properties` in the queue's directory, without a prefix:
 | `hostname` | (required) | The name the queue gives other servers (EHLO) and uses in notifications |
 | `domains` | (required) | Local domains, comma-separated |
 | `aliases`, `postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
-| `relayHost`, `relayUser`, `relayPassword`, `relayTls` | none, none, none, `required` | Smart host; `relayPassword` names where the password is kept (`@keychain:...`, `@file:...`, `@env:...`), never the password |
-| `relayAuth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
+| `smartHost`, `smartHost.port`, `smartHost.user`, `smartHost.password`, `smartHost.tls` | none, 587, none, none, `required` | Smart host (the host only: its port is `smartHost.port`); `smartHost.password` names where the password is kept (`@keychain:...`, `@file:...`, `@env:...`), never the password, and is resolved as SMTP's (`parley.credentials.smtp.*`) |
+| `smartHost.auth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
 | `resolver`, `dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns`. The checks of incoming mail use the same DNS servers. |
 | `preferIpv6` | false | With `parley-dns`: try mail hosts' IPv6 addresses before IPv4 (every host's addresses of both families are tried either way) |
 | `tls` | `opportunistic` | STARTTLS to MX hosts: `none`, `opportunistic` or `required` |
 | `remotePort` | 25 | The port of other mail servers |
-| `workers`, `retry`, `delayWarningHours`, `maxAgeHours` | 4, `1,5,15,30,60,120`, 4, 120 | Delivery workers, retry minutes, the delay notice and when a message is returned |
+| `workers`, `retry`, `delayWarning`, `maxAge` | 4, `1m,5m,15m,30m,1h,2h`, `4h`, `5d` | Delivery workers, the waits between tries, the delay notice and when a message is returned (durations: a number without a unit is ms) |
 | `history`, `historyDirectory`, `historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
 | `historyFileSource` | the mail root's | The file system of the history's folder, a FileSource type id such as `FileProxy` (local disk). One other than the mail root's needs `historyDirectory`. Set it to `FileProxy` when the mail is in a database: each log line is a row and a commit there |
 | `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
@@ -315,7 +315,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 | `arc.trustedSealers` | none | Domains whose passing ARC chains override a DMARC failure, comma-separated |
 | `dmarc.aggregateReports`, `dmarc.failureReports` | false, false | Send DMARC aggregate (`rua=`) and failure (`ruf=`) reports |
 | `dmarc.reportEmail`, `dmarc.reportOrgName` | (required with reports) | The reports' sender address and reporting organization |
-| `dmarc.reportIntervalHours`, `dmarc.maxFailureReportsPerHour` | 24, 10 | How often aggregate reports go out; failure reports per domain per hour |
+| `dmarc.reportInterval`, `dmarc.maxFailureReportsPerHour` | `24h`, 10 | How often aggregate reports go out; failure reports per domain per hour |
 
 ### Not included
 
