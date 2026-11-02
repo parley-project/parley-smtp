@@ -9,6 +9,9 @@
 - **No relay with implicit TLS**: `parley.mail.smtp.secure` (the relay on implicit TLS, on `parley.mail.smtps.port`,
   whose default was 25) and `parley.mail.smtps.port` are no longer read; a warning says so. RFC 8314's implicit TLS
   is submission's (`submissions`); the relay is SMTP with STARTTLS.
+- **No relay with implicit TLS in code either** (To-Do 2.17): `new SmtpServer(port, name, true)` and
+  `new SmtpServer(port, name, true, false)` throw IllegalArgumentException, as does `setSubmission(false)` on a
+  submission server with implicit TLS; `SmtpServer.SMTPS_PREFIX` is removed. Use `submissionServer(true)`.
 
 ### Changed (2026-10-26: each server alone, shared assets carry their own settings)
 
