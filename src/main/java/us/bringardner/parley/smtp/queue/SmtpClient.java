@@ -2,7 +2,7 @@ package us.bringardner.parley.smtp.queue;
 
 import us.bringardner.parley.io.IoUtils;
 import us.bringardner.parley.mail.Sasl;
-import us.bringardner.parley.mail.SaslPrep;
+import us.bringardner.parley.net.sasl.SaslPrep;
 import us.bringardner.parley.net.capability.CapabilitySet;
 import us.bringardner.parley.net.sasl.ISaslClient;
 import us.bringardner.parley.net.sasl.SaslClients;
