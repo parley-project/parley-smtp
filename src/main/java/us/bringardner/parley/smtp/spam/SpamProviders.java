@@ -114,7 +114,7 @@ public final class SpamProviders {
 			return SpamStatus.down(String.join("; ", problems));
 		}
 		Map<String, String> s = new LinkedHashMap<>(settings);
-		s.put(SpamProvider.TIMEOUT_MILLIS, String.valueOf(timeoutMillis));
+		s.put(SpamProvider.TIMEOUT, String.valueOf(timeoutMillis));
 		SpamFilter f = null;
 		try {
 			f = p.create(s);

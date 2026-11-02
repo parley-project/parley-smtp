@@ -22,7 +22,7 @@ import us.bringardner.parley.files.ConnectionSettings;
  * arguments, must hold no state (the same instance serves every caller) and must be thread safe.
  * <p>
  * The settings are kept in the queue's properties as {@code spam.<id>.<key>}; the engine adds
- * {@value #TIMEOUT_MILLIS} (the longest a call may take) to what {@link #create} gets.
+ * {@value #TIMEOUT} (the longest a call may take) to what {@link #create} gets.
  */
 public interface SpamProvider {
 
@@ -36,8 +36,11 @@ public interface SpamProvider {
 		STATUS
 	}
 
-	/** The setting the engine adds to those of the provider: the longest a call may take, in milliseconds. */
-	String TIMEOUT_MILLIS = "timeoutMillis";
+	/**
+	 * The setting the engine adds to those of the provider: the longest a call may take, a duration
+	 * (parley-core's {@code Durations}: {@code 5s}, or a number of milliseconds).
+	 */
+	String TIMEOUT = "timeout";
 
 	/** The id (lower case letters and digits): the value of {@code spam.provider} and the prefix of {@code spam.<id>.*}. */
 	String getId();
@@ -77,7 +80,7 @@ public interface SpamProvider {
 	/**
 	 * Make a filter.
 	 *
-	 * @param settings the provider's settings that are set (keys without the prefix), and {@link #TIMEOUT_MILLIS}
+	 * @param settings the provider's settings that are set (keys without the prefix), and {@link #TIMEOUT}
 	 * @throws IllegalArgumentException if a setting is wrong
 	 */
 	SpamFilter create(Map<String, String> settings);

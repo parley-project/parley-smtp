@@ -2,6 +2,26 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-02: durations and the smart host's names, To-Do 2.19)
+
+- **Times are durations, with the unit in the value** (`30s`, `5m`, `4h`, `5d`; parley-core's `Durations`). A number
+  without a unit is **milliseconds**, so a 1.x `retry=1,5,15` must become `retry=1m,5m,15m` (a wait under a second
+  gets a warning).
+  - The queue's `maxAge` (was `maxAgeHours`), `delayWarning` (was `delayWarningHours`), `dmarc.reportInterval` (was
+    `dmarc.reportIntervalHours`) and `retry` (was minutes). A wrong value refuses the queue, naming the setting.
+  - Each SMTP server's `timeout`, `pregreet.delay` (was `pregreet.millis`) and `spam.timeout` (was
+    `spam.timeoutMillis`). The spam engine gives providers their limit as `SpamProvider.TIMEOUT` (`timeout`, was
+    `TIMEOUT_MILLIS`, `timeoutMillis`); `Spam.getTimeoutMillis()`.
+- **The queue's smart host is `smartHost.*`**: `smartHost` (the host only; a `host:port` value refuses the queue),
+  `smartHost.port` (default 587), `smartHost.user`, `smartHost.password` (where the password is kept, as before),
+  `smartHost.auth` and `smartHost.tls`, replacing `relayHost`, `relayUser`, `relayPassword`, `relayAuth` and
+  `relayTls`. Who may relay through the server stays `relayNetworks`.
+- **The smart host's password is resolved as SMTP's** (`SmtpServer.CREDENTIALS_ID`, `smtp`), with the host and user,
+  so `parley.credentials.smtp.keyStore` (parley-files) chooses its key store.
+- The queue's old names are no longer read; each one still in `queue.properties` gets a warning naming its new one.
+  The renamed server settings are in `META-INF/parley/settings.list`, so the start-up check names theirs too.
+- parley-dns's root servers file is `root.hints` (was `sbelt.prop`) in the docs of the iterative resolver.
+
 ### Changed (2026-11-01: parley.servers says which servers run, To-Do 2.12)
 
 - **`submissions` runs on 465 when `parley.servers` lists it** and it has a TLS key store (skipped with a warning while

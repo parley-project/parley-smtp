@@ -59,7 +59,7 @@ import us.bringardner.parley.smtp.queue.QueueHistory;
  * {@code timeout}, {@code maxHops}, the checks of incoming mail ({@code dkim.verify},
  * {@code spf.check}, {@code spf.rejectFail}, {@code dmarc.check}, {@code dmarc.enforce},
  * {@code dmarc.publicSuffixList}, {@code arc.verify}), the checks of the client before any mail
- * ({@code dnsbl.zones}, {@code rdns.require}, {@code helo.check}, {@code pregreet.millis},
+ * ({@code dnsbl.zones}, {@code rdns.require}, {@code helo.check}, {@code pregreet.delay},
  * {@code rate.connectionsPerMinute}, {@code rate.maxConcurrent}, {@code rate.messagesPerMinute},
  * {@code rate.recipientsPerMinute}, {@code checks.logOnly}: see {@link ConnectionChecks}; all off
  * by default, and skipped for clients that may relay) and where its queue is ({@value #QUEUE},
@@ -219,6 +219,11 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		return v == null ? defaultValue : Integer.parseInt(v);
 	}
 
+	/** A duration setting of this server ({@code 30s}, {@code 5m}; a bare number is ms), in ms */
+	private long durationSetting(String name, long defaultMillis) {
+		return getDuration(propertyName(name), defaultMillis);
+	}
+
 	/**
 	 * Read this server's own settings (about its port), under its prefix: again when the prefix
 	 * changes ({@link #setSubmission(boolean)}).
@@ -229,7 +234,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		hostname = setting("hostname"); // required: start() says so
 		maxMessageSize = setting("maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 		maxRecipients = setting("maxRecipients", 100);
-		timeout = setting("timeout", 5 * 60 * 1000);
+		timeout = us.bringardner.parley.core.util.Durations.toIntMillis(durationSetting("timeout", 5 * 60 * 1000));
 		maxHops = setting("maxHops", 100);
 		String networks = setting("relayNetworks");
 		relayNetworks = networks == null ? AddressMatcher.NONE : AddressMatcher.parse(networks);
@@ -261,7 +266,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		connectionChecks.setLogOnly(setting("checks.logOnly", false));
 		connectionChecks.setRequireReverseDns(setting("rdns.require", false));
 		connectionChecks.setCheckHelo(setting("helo.check", false));
-		connectionChecks.setPregreetMillis(setting("pregreet.millis", 0L));
+		connectionChecks.setPregreetMillis(durationSetting("pregreet.delay", 0L));
 		connectionChecks.setMaxConnectionsPerMinute(setting("rate.connectionsPerMinute", 0));
 		connectionChecks.setMaxConcurrentPerAddress(setting("rate.maxConcurrent", 0));
 		connectionChecks.setMaxMessagesPerMinute(setting("rate.messagesPerMinute", 0));
@@ -280,6 +285,24 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		} catch (RuntimeException e) {
 			logError("Wrong spam settings (" + propertyName("spam.*") + "): " + e.getMessage() + "; spam checking keeps its earlier settings", e);
 		}
+	}
+
+	/** SMTP's id for its own credential settings, {@code parley.credentials.smtp.*} */
+	public static final String CREDENTIALS_ID = "smtp";
+
+	/** The queue's 1.x / earlier 2.0.0 names, and what they are now (a warning names the new one) */
+	private static final java.util.Map<String, String> RENAMED_QUEUE_SETTINGS;
+	static {
+		java.util.Map<String, String> m = new java.util.LinkedHashMap<>();
+		m.put("relayHost", "smartHost (and smartHost.port)");
+		m.put("relayUser", "smartHost.user");
+		m.put("relayPassword", "smartHost.password");
+		m.put("relayAuth", "smartHost.auth");
+		m.put("relayTls", "smartHost.tls");
+		m.put("maxAgeHours", "maxAge, a duration (5d)");
+		m.put("delayWarningHours", "delayWarning, a duration (4h)");
+		m.put("dmarc.reportIntervalHours", "dmarc.reportInterval, a duration (24h)");
+		RENAMED_QUEUE_SETTINGS = java.util.Collections.unmodifiableMap(m);
 	}
 
 	/** A queue setting, or null */
@@ -312,10 +335,19 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (queueSetting(q, "domains") == null) {
 			throw new IOException("The mail queue's domains aren't set" + where);
 		}
-		String pw = queueSetting(q, "relayPassword");
+		String pw = queueSetting(q, "smartHost.password");
 		if (pw != null && !us.bringardner.parley.files.credentials.CredentialRef.isReference(pw)) {
-			throw new IOException("The mail queue's relayPassword must name where the password is kept (@keychain:..., @file:..., @env:...), not hold it"
+			throw new IOException("The mail queue's smartHost.password must name where the password is kept (@keychain:..., @file:..., @env:...), not hold it"
 					+ where);
+		}
+		String smartHost = queueSetting(q, "smartHost");
+		if (smartHost != null && smartHost.matches("[^:\\[\\]]+:\\d+")) {
+			throw new IOException("The mail queue's smartHost is the host only (" + smartHost + "): put the port in smartHost.port" + where);
+		}
+		for (java.util.Map.Entry<String, String> e : RENAMED_QUEUE_SETTINGS.entrySet()) {
+			if (queueSetting(q, e.getKey()) != null) {
+				logError("The mail queue's " + e.getKey() + where + " is no longer read: it is " + e.getValue() + " in 2.0.0");
+			}
 		}
 		DmarcReporter reporter = deliveryConfig.getDmarc().getReporter();
 		String agg = queueSetting(q, "dmarc.aggregateReports");
@@ -352,30 +384,30 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				logError("Can't read the aliases file " + aliases, e);
 			}
 		}
-		tmp = queueSetting(q, "relayHost");
+		tmp = queueSetting(q, "smartHost");
 		if (tmp != null) {
-			int colon = tmp.lastIndexOf(':');
-			if (colon > 0) {
-				c.setRelayHost(tmp.substring(0, colon));
-				c.setRelayPort(Integer.parseInt(tmp.substring(colon + 1)));
-			} else {
-				c.setRelayHost(tmp);
+			c.setRelayHost(tmp);
+			String port = queueSetting(q, "smartHost.port");
+			if (port != null) {
+				c.setRelayPort(Integer.parseInt(port));
 			}
 		}
-		c.setRelayUser(queueSetting(q, "relayUser"));
-		tmp = queueSetting(q, "relayPassword");
+		c.setRelayUser(queueSetting(q, "smartHost.user"));
+		tmp = queueSetting(q, "smartHost.password");
 		if (tmp != null) {
-			// a secret: the settings name where it is kept (@keychain:..., @file:..., @env:...), never the password
+			// a secret: the settings name where it is kept (@keychain:..., @file:..., @env:...), never the password;
+			// resolved as SMTP's (parley.credentials.smtp.*)
 			char[] secret = us.bringardner.parley.files.credentials.Credentials.secret(tmp,
-					us.bringardner.parley.files.credentials.CredentialRequest.forProperty("relayPassword"));
+					new us.bringardner.parley.files.credentials.CredentialRequest(CREDENTIALS_ID, "smartHost.password",
+							c.getRelayHost(), c.getRelayUser()));
 			c.setRelayPassword(new String(secret));
 			java.util.Arrays.fill(secret, '\0');
 		}
-		tmp = queueSetting(q, "relayAuth");
+		tmp = queueSetting(q, "smartHost.auth");
 		if (tmp != null) {
 			c.setRelayAuthMechanisms(java.util.Arrays.asList(tmp.split("\\s*,\\s*")));
 		}
-		tmp = queueSetting(q, "relayTls");
+		tmp = queueSetting(q, "smartHost.tls");
 		if (tmp != null) {
 			c.setRelayTlsMode(DeliveryConfig.TlsMode.valueOf(tmp.toUpperCase(Locale.ROOT)));
 		}
@@ -464,9 +496,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (email != null) {
 			reporter.setEmail(email);
 		}
-		tmp = queueSetting(q, "dmarc.reportIntervalHours");
+		tmp = queueSetting(q, "dmarc.reportInterval");
 		if (tmp != null) {
-			reporter.setIntervalMillis((long) (Double.parseDouble(tmp) * 3_600_000));
+			reporter.setIntervalMillis(queueDuration("dmarc.reportInterval", tmp));
 		}
 		tmp = queueSetting(q, "dmarc.maxFailureReportsPerHour");
 		if (tmp != null) {
@@ -478,20 +510,37 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 		tmp = queueSetting(q, "retry");
 		if (tmp != null) {
-			String[] p = tmp.split(",");
-			long[] schedule = new long[p.length];
-			for (int i = 0; i < p.length; i++) {
-				schedule[i] = (long) (Double.parseDouble(p[i].trim()) * 60_000);
+			long[] schedule;
+			try {
+				schedule = us.bringardner.parley.core.util.Durations.parseList(tmp);
+			} catch (IllegalArgumentException e) {
+				throw new IllegalArgumentException("retry=" + tmp + ": " + e.getMessage(), e);
+			}
+			for (long r : schedule) {
+				if (r < 1000) {
+					// 1.x's retry was in minutes; a bare number is ms now
+					logError("The mail queue's retry=" + tmp + where + " has a wait under a second: a number without a unit is ms (1m,5m,15m)");
+					break;
+				}
 			}
 			c.setRetrySchedule(schedule);
 		}
-		tmp = queueSetting(q, "maxAgeHours");
+		tmp = queueSetting(q, "maxAge");
 		if (tmp != null) {
-			c.setMaxAge((long) (Double.parseDouble(tmp) * 3_600_000));
+			c.setMaxAge(queueDuration("maxAge", tmp));
 		}
-		tmp = queueSetting(q, "delayWarningHours");
+		tmp = queueSetting(q, "delayWarning");
 		if (tmp != null) {
-			c.setDelayWarning((long) (Double.parseDouble(tmp) * 3_600_000));
+			c.setDelayWarning(queueDuration("delayWarning", tmp));
+		}
+	}
+
+	/** A duration in the queue's settings ({@code 5d}, {@code 4h}; a bare number is ms) */
+	private static long queueDuration(String name, String value) {
+		try {
+			return us.bringardner.parley.core.util.Durations.parse(value);
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException(name + "=" + value + ": " + e.getMessage(), e);
 		}
 	}
 
