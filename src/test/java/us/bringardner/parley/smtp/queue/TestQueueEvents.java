@@ -65,6 +65,11 @@ public class TestQueueEvents {
 		public IPrincipal getPrincipal(String user) {
 			return users.get(user);
 		}
+
+		@Override
+		public boolean verifyPassword(IPrincipal user, byte[] credentials) {
+			return false;
+		}
 	}
 
 	@BeforeEach
