@@ -31,6 +31,9 @@
     `dmarc.reportOrgName` and `dmarc.reportEmail`, and ARC seals only with an `arc.domain`.
 
 ### Added
+- **The settings this module reads are listed** in `META-INF/parley/settings.list`, so a Parley server's
+  start-up check (parley-net's `KnownSettings`, To-Do 2.16) knows them and warns only about a setting
+  nothing reads. A test checks the list has every name the code here reads.
 - **Spam providers, found at run time** (`us.bringardner.parley.smtp.spam`): after a message from outside is received
   (with its SPF/DKIM/DMARC results already in the headers) and before it is accepted, the SMTP server asks a spam
   scanner for a `SpamVerdict` (score, spam or not, the scanner's own action, the rules that matched).
