@@ -1,0 +1,43 @@
+# The settings parley-smtp reads, for the mail servers' start-up check
+# (format: parley-net's KnownSettings). Add a name here when code here starts reading it.
+# The queue's settings are in its own queue.properties, not here.
+
+prefix parley.mail.smtp
+prefix parley.mail.submission
+prefix parley.mail.submissions
+
+parley.mail.smtp.configFile
+
+# each SMTP server's (SmtpServer)
+parley.mail.{smtp,submission,submissions}.hostname
+parley.mail.{smtp,submission,submissions}.queue
+parley.mail.{smtp,submission,submissions}.timeout
+parley.mail.{smtp,submission,submissions}.maxHops
+parley.mail.{smtp,submission,submissions}.maxMessageSize
+parley.mail.{smtp,submission,submissions}.maxRecipients
+parley.mail.{smtp,submission,submissions}.relayNetworks
+parley.mail.{smtp,submission,submissions}.requireTls
+parley.mail.{smtp,submission,submissions}.arc.verify
+parley.mail.{smtp,submission,submissions}.dkim.verify
+parley.mail.{smtp,submission,submissions}.dmarc.check
+parley.mail.{smtp,submission,submissions}.dmarc.enforce
+parley.mail.{smtp,submission,submissions}.dmarc.publicSuffixList
+parley.mail.{smtp,submission,submissions}.spf.check
+parley.mail.{smtp,submission,submissions}.spf.rejectFail
+
+# checks of the client before any mail
+parley.mail.{smtp,submission,submissions}.checks.logOnly
+parley.mail.{smtp,submission,submissions}.dnsbl.zones
+parley.mail.{smtp,submission,submissions}.helo.check
+parley.mail.{smtp,submission,submissions}.pregreet.millis
+parley.mail.{smtp,submission,submissions}.rdns.require
+parley.mail.{smtp,submission,submissions}.rate.connectionsPerMinute
+parley.mail.{smtp,submission,submissions}.rate.maxConcurrent
+parley.mail.{smtp,submission,submissions}.rate.messagesPerMinute
+parley.mail.{smtp,submission,submissions}.rate.recipientsPerMinute
+
+# the spam provider and its own settings (providers are plugins: their names aren't known here)
+parley.mail.{smtp,submission,submissions}.spam.**
+
+# smtps, the relay with implicit TLS, was dropped in 2.0.0
+renamed parley.mail.smtps.port parley.mail.submissions.port
