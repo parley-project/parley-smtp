@@ -47,10 +47,12 @@ import us.bringardner.parley.smtp.queue.QueueHistory;
  * host), but only for authenticated users or trusted networks.
  * <p>
  * One SmtpServer listens on one port, and is written as if it were the only server: it reads only
- * its own settings, under its prefix ({@value #SMTP_PREFIX}, {@value #SMTPS_PREFIX},
- * {@value #SUBMISSION_PREFIX} or {@value #SUBMISSIONS_PREFIX}), from its configuration (the system
+ * its own settings, under its prefix ({@value #SMTP_PREFIX}, {@value #SUBMISSION_PREFIX} or
+ * {@value #SUBMISSIONS_PREFIX}), from its configuration (the system
  * properties for a server made by code). Whether it is a relay or a submission server comes from how
  * it is made ({@link #SmtpServer(int, String, boolean, boolean)}, {@link #submissionServer(boolean)}).
+ * There is no relay with implicit TLS: RFC 8314's implicit TLS is submission's, and the relay is
+ * SMTP with STARTTLS.
  * <p>
  * Its own settings are about its port: {@code hostname} (required: the greeting and Received
  * headers), {@code requireTls}, {@code relayNetworks}, {@code maxMessageSize}, {@code maxRecipients},
@@ -74,8 +76,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	public static final String SMTP_NAME = "JSmtp";
 	/** The prefix of the properties of an SMTP relay server (port 25). */
 	public static final String SMTP_PREFIX = "parley.mail.smtp";
-	/** The prefix of the properties of an SMTP relay server with implicit TLS. */
-	public static final String SMTPS_PREFIX = "parley.mail.smtps";
 	/** The prefix of the properties of a submission server (RFC 6409, port 587). */
 	public static final String SUBMISSION_PREFIX = "parley.mail.submission";
 	/** The prefix of the properties of a submission server with implicit TLS (RFC 8314, port 465). */
@@ -113,14 +113,22 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private QueueHistory queueHistory;
 	private boolean queueStarted;
 
+	/**
+	 * A relay (port 25's server).
+	 *
+	 * @param secure must be false: there is no relay with implicit TLS
+	 *               ({@link #submissionServer(boolean)} makes one with it)
+	 * @throws IllegalArgumentException when secure is true
+	 */
 	public SmtpServer(int port, String name, boolean secure) {
 		this(port, name, secure, false);
 	}
 
 	/**
-	 * @param secure     implicit TLS
+	 * @param secure     implicit TLS, only for a submission server (RFC 8314)
 	 * @param submission a submission server (RFC 6409: AUTH required), reading its settings with
 	 *                   {@value #SUBMISSION_PREFIX} ({@value #SUBMISSIONS_PREFIX} with implicit TLS)
+	 * @throws IllegalArgumentException for a relay with implicit TLS
 	 */
 	public SmtpServer(int port, String name, boolean secure, boolean submission) {
 		super(port, name, prefixOf(secure, submission), secure);
@@ -134,8 +142,13 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (submission) {
 			return secure ? SUBMISSIONS_PREFIX : SUBMISSION_PREFIX;
 		}
-		return secure ? SMTPS_PREFIX : SMTP_PREFIX;
+		if (secure) {
+			throw new IllegalArgumentException(NO_IMPLICIT_TLS_RELAY);
+		}
+		return SMTP_PREFIX;
 	}
+
+	static final String NO_IMPLICIT_TLS_RELAY = "There is no SMTP relay with implicit TLS; implicit TLS is for a submission server (submissionServer(true))";
 
 	@Override
 	protected String getRootProperty() {
@@ -776,19 +789,21 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 * with the {@value #SUBMISSION_PREFIX} prefix ({@value #SUBMISSIONS_PREFIX} with implicit TLS)
 	 * instead of {@value #SMTP_PREFIX}; making it one when it is made
 	 * ({@link #SmtpServer(int, String, boolean, boolean)}) is simpler.
+	 *
+	 * @throws IllegalArgumentException when a submission server with implicit TLS is made a relay:
+	 *                                  there is no relay with implicit TLS
 	 */
 	public void setSubmission(boolean submission) {
-		this.submission = submission;
 		String prefix = getPropertyPrefix();
+		if (!submission && SUBMISSIONS_PREFIX.equals(prefix)) {
+			throw new IllegalArgumentException(NO_IMPLICIT_TLS_RELAY);
+		}
+		this.submission = submission;
 		String before = prefix;
 		if (submission && SMTP_PREFIX.equals(prefix)) {
 			setPropertyPrefix(SUBMISSION_PREFIX);
-		} else if (submission && SMTPS_PREFIX.equals(prefix)) {
-			setPropertyPrefix(SUBMISSIONS_PREFIX);
 		} else if (!submission && SUBMISSION_PREFIX.equals(prefix)) {
 			setPropertyPrefix(SMTP_PREFIX);
-		} else if (!submission && SUBMISSIONS_PREFIX.equals(prefix)) {
-			setPropertyPrefix(SMTPS_PREFIX);
 		}
 		if (!getPropertyPrefix().equals(before)) {
 			readServerSettings(); // the new prefix's own settings

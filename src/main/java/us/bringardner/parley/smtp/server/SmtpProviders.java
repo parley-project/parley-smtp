@@ -103,7 +103,7 @@ public final class SmtpProviders {
 	static {
 		Map<String, String> m = new LinkedHashMap<>();
 		m.put(SmtpServer.SMTP_PREFIX + ".secure", "the relay is plain SMTP with STARTTLS; for implicit TLS list submissions in parley.servers");
-		m.put(SmtpServer.SMTPS_PREFIX + ".port", "there is no relay with implicit TLS; for implicit TLS list submissions in parley.servers");
+		m.put("parley.mail.smtps.port", "there is no relay with implicit TLS; for implicit TLS list submissions in parley.servers");
 		OBSOLETE = Collections.unmodifiableMap(m);
 	}
 

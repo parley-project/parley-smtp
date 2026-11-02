@@ -3,6 +3,7 @@ package us.bringardner.parley.smtp.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
@@ -267,6 +268,22 @@ public class TestSmtpProviders {
 		assertEquals(25, smtp.port(c));
 		assertEquals(2, smtp.warnings(c).size(), smtp.warnings(c).toString());
 		assertFalse(smtp.implicitTls());
+	}
+
+	@Test
+	public void noRelayWithImplicitTlsInCode() {
+		assertThrows(IllegalArgumentException.class, () -> new SmtpServer(0, SmtpServer.SMTP_NAME, true), "a relay with implicit TLS");
+		assertThrows(IllegalArgumentException.class, () -> new SmtpServer(0, SmtpServer.SMTP_NAME, true, false), "a relay with implicit TLS");
+		SmtpServer submissions = new SmtpServer(0, SmtpServer.SMTP_NAME, true, true);
+		assertEquals(SmtpServer.SUBMISSIONS_PREFIX, submissions.getPropertyPrefix());
+		assertThrows(IllegalArgumentException.class, () -> submissions.setSubmission(false), "made a relay with implicit TLS");
+		assertTrue(submissions.isSubmission(), "unchanged when refused");
+		assertEquals(SmtpServer.SUBMISSIONS_PREFIX, submissions.getPropertyPrefix());
+		SmtpServer relay = new SmtpServer(0, SmtpServer.SMTP_NAME, false);
+		relay.setSubmission(true);
+		assertEquals(SmtpServer.SUBMISSION_PREFIX, relay.getPropertyPrefix());
+		relay.setSubmission(false);
+		assertEquals(SmtpServer.SMTP_PREFIX, relay.getPropertyPrefix());
 	}
 
 	@Test
