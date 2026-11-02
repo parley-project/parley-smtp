@@ -65,11 +65,11 @@ submission.start();
 relay.send(from, List.of(to), message);            // send mail from code
 ```
 
-Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.root=/var/mail -Dparley.mail.smtp.hostname=mx.example.com -Dparley.mail.submission.hostname=mx.example.com`. This starts port 25 and, unless `parley.mail.submission.port=0`, port 587 (and 465 when `parley.mail.submissions.port` is set), each using the queue its settings name (by default the same one, `.smtp-queue` under the root).
+Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.root=/var/mail -Dparley.mail.smtp.hostname=mx.example.com -Dparley.mail.submission.hostname=mx.example.com`. This starts port 25, port 587 and, when it has a TLS key store, port 465 (submission with implicit TLS), each using the queue its settings name (by default the same one, `.smtp-queue` under the root).
 
 `main` runs the providers `smtp`, `submission` and `submissions` (`SmtpProviders`) with parley-net's
 `ServerMain.launch`: settings from `parley-mail.properties` then `parley-smtp.properties` in the settings
-folder, the JVM's `-D` options and the command line; a port of 0 turns that server off. To run SMTP with
+folder, the JVM's `-D` options and the command line. To run some of them, or SMTP with
 other servers in one process, list the ids in parley-net's launcher (see parley-mail's README).
 
 Each server is written as if it were the only one: it reads only its own configuration, and nothing
@@ -256,15 +256,17 @@ Forwarding (an alias with members at other servers, a mailing list) breaks SPF, 
 
 ### Configuration
 
-Each server reads its own settings under its prefix: `parley.mail.smtp` (the relay), `parley.mail.smtps`
-(the relay with implicit TLS), `parley.mail.submission` and `parley.mail.submissions`. The table gives
+Each server reads its own settings under its prefix: `parley.mail.smtp` (the relay),
+`parley.mail.submission` and `parley.mail.submissions`. There is no relay with implicit TLS (RFC 8314's
+implicit TLS is submission's): 1.x's `parley.mail.smtp.secure` and `parley.mail.smtps.port` are no longer
+read, and a warning says so. The table gives
 the relay's names; a submission server's are the same after its prefix (`parley.mail.submission.hostname`).
 There is no fallback from one prefix to another, and no setting is taken from another setting.
 
 | Server setting | Default | Meaning |
 |---|---|---|
-| `parley.mail.smtp.port` | 25 | Relay (MX) port (`smtp`); 0 turns it off |
-| `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / off | Submission ports (`submission`, `submissions`; 0 = off); 465 uses implicit TLS |
+| `parley.mail.smtp.port` | 25 | Relay (MX) port (`smtp`) |
+| `parley.mail.submission.port` / `parley.mail.submissions.port` | 587 / 465 | Submission ports (`submission`, `submissions`); 465 uses implicit TLS and needs a key store. Which servers run is what `parley.servers` lists |
 | `parley.mail.root` | (required) | Maildrop root, shared with POP3 and IMAP; the store has its own settings (see parley-mail) |
 | `parley.mail.smtp.hostname` | (required) | Name in this server's greeting and Received headers |
 | `parley.mail.smtp.queue` | `.smtp-queue` | This server's queue: a directory under the maildrop root |

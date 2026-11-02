@@ -152,9 +152,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	}
 
 	/**
-	 * Run the relay (parley.mail.smtp.port, default 25; 0 turns it off), submission
-	 * (parley.mail.submission.port, default 587; 0 turns it off) and, when
-	 * parley.mail.submissions.port is set, submission with implicit TLS, until the process is stopped;
+	 * Run the relay (parley.mail.smtp.port, default 25), submission (parley.mail.submission.port,
+	 * default 587) and submission with implicit TLS (parley.mail.submissions.port, default 465;
+	 * skipped with a warning while it has no TLS key store), until the process is stopped;
 	 * see {@link SmtpProviders} and parley-net's ServerMain.launch. Each server reads its own settings
 	 * with its prefix: parley.mail.smtp, parley.mail.submission and parley.mail.submissions.
 	 */
