@@ -2,6 +2,12 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-02: parley-net's IAccessControlList.close, To-Do 3.3)
+
+- **Local delivery uses the server's access control list of the current start**: a list the server made from its
+  `authenticationProvider` setting is closed when the server stops and made again when it starts, so the queue the
+  server made is given the new one at each start.
+
 ### Changed (2026-11-02: durations and the smart host's names, To-Do 2.19)
 
 - **Times are durations, with the unit in the value** (`30s`, `5m`, `4h`, `5d`; parley-core's `Durations`). A number

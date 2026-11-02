@@ -654,7 +654,13 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (queueStarted) {
 			return;
 		}
-		getQueue().start();
+		MailQueue q = getQueue();
+		if (ownsQueue) {
+			// a list the server made from its provider setting is closed when it stops and made
+			// again at the next start: local delivery uses the one in use now
+			deliveryConfig.setAccessControl(getAccessControl());
+		}
+		q.start();
 		queueStarted = true;
 		startDmarcReports();
 	}
