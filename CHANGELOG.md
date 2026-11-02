@@ -2,6 +2,14 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-01: parley.servers says which servers run, To-Do 2.12)
+
+- **`submissions` runs on 465 when `parley.servers` lists it** and it has a TLS key store (skipped with a warning while
+  it has none); `parley.mail.submissions.port` is only its port, and port 0 no longer turns a server off.
+- **No relay with implicit TLS**: `parley.mail.smtp.secure` (the relay on implicit TLS, on `parley.mail.smtps.port`,
+  whose default was 25) and `parley.mail.smtps.port` are no longer read; a warning says so. RFC 8314's implicit TLS
+  is submission's (`submissions`); the relay is SMTP with STARTTLS.
+
 ### Changed (2026-10-26: each server alone, shared assets carry their own settings)
 
 - **Each SMTP server reads only its own settings, under its own prefix**, and the queue carries its own:

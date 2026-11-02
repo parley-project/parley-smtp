@@ -1,6 +1,9 @@
 package us.bringardner.parley.smtp.server;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -18,7 +21,9 @@ import us.bringardner.parley.smtp.queue.MailQueueBean;
  * The SMTP servers a launcher can run ({@code parley.servers=smtp,submission,submissions}): the
  * relay (MX, port 25), submission (587) and submission with implicit TLS (465). Each is made from
  * its own configuration, read from {@code parley-mail.properties}, then {@code parley-smtp.properties}
- * (or the file {@code parley.mail.smtp.configFile} names).
+ * (or the file {@code parley.mail.smtp.configFile} names). Each runs when parley.servers lists it, on
+ * its own port ({@code <prefix>.port}: 25, 587, 465); submissions is skipped with a warning while it
+ * has no TLS key store.
  * <p>
  * Each server opens the queue its settings name ({@code <prefix>.queue}, default
  * {@code .smtp-queue} under the maildrop root); servers given the same queue share it through the
@@ -93,41 +98,39 @@ public final class SmtpProviders {
 		};
 	}
 
-	/** {@code parley.mail.smtp.secure=true}: the relay with implicit TLS (on parley.mail.smtps.port) */
-	static boolean legacySecure(Properties configuration) {
-		String v = configuration.getProperty(SmtpServer.SMTP_PREFIX + ".secure");
-		return v != null && Boolean.parseBoolean(v.trim());
+	/** Read by 1.x for a relay with implicit TLS, which 2.0.0 doesn't have (RFC 8314's implicit TLS is submission's) */
+	static final Map<String, String> OBSOLETE;
+	static {
+		Map<String, String> m = new LinkedHashMap<>();
+		m.put(SmtpServer.SMTP_PREFIX + ".secure", "the relay is plain SMTP with STARTTLS; for implicit TLS list submissions in parley.servers");
+		m.put(SmtpServer.SMTPS_PREFIX + ".port", "there is no relay with implicit TLS; for implicit TLS list submissions in parley.servers");
+		OBSOLETE = Collections.unmodifiableMap(m);
 	}
 
-	/** The relay (MX, port 25): {@code smtp}, on unless parley.mail.smtp.port is 0 */
+	/** The relay (MX, port 25): {@code smtp} */
 	public static final class Smtp extends MailServerProvider {
 		public Smtp() {
-			super("smtp", "SMTP relay (MX)", "parley-smtp.properties", SmtpServer.CONFIG_PROP);
+			super("smtp", "SMTP relay (MX)", "parley-smtp.properties", SmtpServer.CONFIG_PROP, SmtpServer.SMTP_PREFIX, SMTP.SMTP_PORT, false);
 		}
 
 		@Override
-		public int port(Properties configuration) {
-			return intProperty(configuration, (legacySecure(configuration) ? SmtpServer.SMTPS_PREFIX : SmtpServer.SMTP_PREFIX) + ".port", SMTP.SMTP_PORT);
+		protected Map<String, String> obsoleteSettings() {
+			return OBSOLETE;
 		}
 
 		@Override
 		public ServerMain.Service create(ServerContext context, Properties configuration) throws Exception {
 			int port = port(configuration);
-			boolean secure = legacySecure(configuration);
-			SmtpServer s = AbstractMailServer.makeIn(context, configuration, () -> new SmtpServer(port, SmtpServer.SMTP_NAME, secure, false));
+			SmtpServer s = AbstractMailServer.makeIn(context, configuration, () -> new SmtpServer(port, SmtpServer.SMTP_NAME, false, false));
 			return service(s, id(), "SMTP server", context);
 		}
 	}
 
-	/** Submission (RFC 6409, port 587, STARTTLS): {@code submission}, on unless parley.mail.submission.port is 0 */
+	/** Submission (RFC 6409, port 587, STARTTLS): {@code submission} */
 	public static final class Submission extends MailServerProvider {
 		public Submission() {
-			super("submission", "SMTP submission", "parley-smtp.properties", SmtpServer.CONFIG_PROP);
-		}
-
-		@Override
-		public int port(Properties configuration) {
-			return intProperty(configuration, SmtpServer.SUBMISSION_PREFIX + ".port", SMTP.SUBMISSION_PORT);
+			super("submission", "SMTP submission", "parley-smtp.properties", SmtpServer.CONFIG_PROP, SmtpServer.SUBMISSION_PREFIX,
+					SMTP.SUBMISSION_PORT, false);
 		}
 
 		@Override
@@ -138,18 +141,11 @@ public final class SmtpProviders {
 		}
 	}
 
-	/**
-	 * Submission with implicit TLS (RFC 8314, port 465): {@code submissions}, on when
-	 * parley.mail.submissions.port is set (and not 0)
-	 */
+	/** Submission with implicit TLS (RFC 8314, port 465): {@code submissions}; it needs a TLS key store */
 	public static final class Submissions extends MailServerProvider {
 		public Submissions() {
-			super("submissions", "SMTP submission with implicit TLS", "parley-smtp.properties", SmtpServer.CONFIG_PROP);
-		}
-
-		@Override
-		public int port(Properties configuration) {
-			return intProperty(configuration, SmtpServer.SUBMISSIONS_PREFIX + ".port", 0);
+			super("submissions", "SMTP submission with implicit TLS", "parley-smtp.properties", SmtpServer.CONFIG_PROP,
+					SmtpServer.SUBMISSIONS_PREFIX, SMTP.SUBMISSIONS_PORT, true);
 		}
 
 		@Override

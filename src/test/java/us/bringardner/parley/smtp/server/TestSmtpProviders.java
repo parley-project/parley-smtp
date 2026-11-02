@@ -45,7 +45,8 @@ public class TestSmtpProviders {
 	private static final String[] CLEARED = { "parley.mail.smtp.port", "parley.mail.submission.port", "parley.mail.submissions.port",
 			"parley.mail.smtp.secure", "parley.mail.users", "parley.mail.root", "parley.mail.smtp.domains", "parley.mail.smtp.hostname",
 			"parley.mail.smtp.authenticationProvider", "parley.mail.smtp.userFile", "parley.mail.submission.authenticationProvider",
-			"parley.mail.submission.userFile", QueueHistory.HISTORY_PROP, QueueHistory.DIRECTORY_PROP };
+			"parley.mail.submission.userFile", "parley.mail.tls.keyStore", "parley.mail.submissions.keyStoreName", QueueHistory.HISTORY_PROP,
+			QueueHistory.DIRECTORY_PROP };
 
 	@TempDir
 	File dir;
@@ -136,7 +137,7 @@ public class TestSmtpProviders {
 		launcher = new ServerLauncher("SmtpTest", new LaunchSettings(new Properties()), Arrays.asList("smtp", "submission", "submissions"), dir,
 				context);
 		launcher.init();
-		assertEquals(ServerLauncher.State.OFF, launcher.getState("submissions"));
+		assertEquals(ServerLauncher.State.OFF, launcher.getState("submissions"), "no key store: skipped");
 		launcher.startAll();
 		assertEquals(ServerLauncher.State.RUNNING, launcher.getState("smtp"));
 		assertEquals(ServerLauncher.State.RUNNING, launcher.getState("submission"));
@@ -256,11 +257,26 @@ public class TestSmtpProviders {
 	}
 
 	@Test
-	public void legacySecureRelay() {
+	public void noRelayWithImplicitTls() {
 		Properties c = new Properties();
 		c.setProperty("parley.mail.smtp.secure", "true");
 		c.setProperty("parley.mail.smtps.port", "0");
-		assertFalse(ServerLauncher.providers().get("smtp").enabled(c), "the relay's port is parley.mail.smtps.port then");
-		assertTrue(ServerLauncher.providers().get("smtp").enabled(new Properties()));
+		us.bringardner.parley.mail.server.MailServerProvider smtp = (us.bringardner.parley.mail.server.MailServerProvider) ServerLauncher.providers()
+				.get("smtp");
+		assertTrue(smtp.enabled(c) && smtp.unavailable(c) == null, "the relay is plain SMTP whatever 1.x's settings say");
+		assertEquals(25, smtp.port(c));
+		assertEquals(2, smtp.warnings(c).size(), smtp.warnings(c).toString());
+		assertFalse(smtp.implicitTls());
+	}
+
+	@Test
+	public void submissionsOnItsStandardPortWithAKeyStore() {
+		us.bringardner.parley.mail.server.MailServerProvider s = (us.bringardner.parley.mail.server.MailServerProvider) ServerLauncher.providers()
+				.get("submissions");
+		Properties c = new Properties();
+		assertEquals(465, s.port(c), "the standard port, not 0 (off)");
+		assertTrue(s.unavailable(c).contains("key store"), s.unavailable(c));
+		c.setProperty("parley.mail.tls.keyStore", "keystore.p12");
+		assertTrue(s.unavailable(c) == null);
 	}
 }
