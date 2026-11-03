@@ -177,15 +177,15 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			java.util.List<ServerMain.Service> ret = new java.util.ArrayList<>();
 			{
 				int p = standalonePort(SMTP_PREFIX, SMTP_PORT);
-				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, false, false), "SMTP server"));
+				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, false, false), "SMTP server", "smtp"));
 			}
 			{
 				int p = standalonePort(SUBMISSION_PREFIX, SUBMISSION_PORT);
-				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, false, true), "Submission server"));
+				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, false, true), "Submission server", "submission"));
 			}
 			if (hasKeyStore(SUBMISSIONS_PREFIX)) {
 				int p = standalonePort(SUBMISSIONS_PREFIX, SUBMISSIONS_PORT);
-				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)"));
+				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)", "submissions"));
 			} else {
 				System.err.println("Warning: Submission server (implicit TLS) is skipped: no TLS key store (set " + MAIL_TLS_KEY_STORE_PROP + " or " + SUBMISSIONS_PREFIX + ".keyStoreName)");
 			}
