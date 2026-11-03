@@ -69,9 +69,10 @@ Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dp
 
 `main` runs them with parley-net's `ServerMain.run`: settings from `parley-smtp.properties` in the
 settings folder (or the file `parley.mail.smtp.configFile` names), the JVM's `-D` options and the
-command line, as system properties. To run some of them, or SMTP with other servers in one process,
-use the mail suite's launcher in parley-mail-admin (ids `smtp`, `submission`, `submissions`; see
-parley-mail's README).
+command line, as system properties. While they run, their stores are the JMX beans
+`us.bringardner.parley:type=MailStore,name=smtp`, `submission` and `submissions`. Running some of them,
+or SMTP with other servers in one process, is an application's job (see parley-mail's README;
+parley-mail-admin is an example).
 
 Each server is written as if it were the only one: it reads only its own configuration, and nothing
 changes when it shares a process with other servers. A server opens the queue its settings name;

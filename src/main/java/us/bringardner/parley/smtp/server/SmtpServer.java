@@ -170,7 +170,8 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 * (parley.mail.submissions.port, default 465) in this process until it is stopped, with
 	 * parley-net's ServerMain.run: the settings are parley-smtp.properties in the settings folder (or
 	 * the file parley.mail.smtp.configFile names) and the command line, read as system properties,
-	 * each server under its prefix. (The mail suite's servers are run by parley-mail-admin's launcher.)
+	 * each server under its prefix. Each server's store is the JMX bean
+	 * us.bringardner.parley:type=MailStore,name=<its id> while it runs (MailServerMain).
 	 */
 	public static void main(String[] args) throws Exception {
 		ServerMain.run("SmtpServer", args, CONFIG_PROP, "parley-smtp.properties", () -> {
