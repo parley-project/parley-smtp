@@ -2,6 +2,14 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+
+### Changed (2026-11-03: the launcher moved to parley-mail-admin)
+
+- **`SmtpProviders` (the providers smtp, submission, submissions) moved to parley-mail-admin** with the launcher, which runs the mail suite; this module
+  registers no server providers. Its `main` runs its servers alone in one process with parley-net's `ServerMain.run`
+  (its settings file and the command line, as system properties; the implicit TLS server only when there is a TLS
+  key store), not through the launcher.
+
 ### Changed (2026-11-02: parley-net's IAccessControlList.close, To-Do 3.3)
 
 - **Local delivery uses the server's access control list of the current start**: a list the server made from its
