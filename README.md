@@ -67,10 +67,11 @@ relay.send(from, List.of(to), message);            // send mail from code
 
 Or from the command line: `java us.bringardner.parley.smtp.server.SmtpServer -Dparley.mail.root=/var/mail -Dparley.mail.smtp.hostname=mx.example.com -Dparley.mail.submission.hostname=mx.example.com`. This starts port 25, port 587 and, when it has a TLS key store, port 465 (submission with implicit TLS), each using the queue its settings name (by default the same one, `.smtp-queue` under the root).
 
-`main` runs the providers `smtp`, `submission` and `submissions` (`SmtpProviders`) with parley-net's
-`ServerMain.launch`: settings from `parley-mail.properties` then `parley-smtp.properties` in the settings
-folder, the JVM's `-D` options and the command line. To run some of them, or SMTP with
-other servers in one process, list the ids in parley-net's launcher (see parley-mail's README).
+`main` runs them with parley-net's `ServerMain.run`: settings from `parley-smtp.properties` in the
+settings folder (or the file `parley.mail.smtp.configFile` names), the JVM's `-D` options and the
+command line, as system properties. To run some of them, or SMTP with other servers in one process,
+use the mail suite's launcher in parley-mail-admin (ids `smtp`, `submission`, `submissions`; see
+parley-mail's README).
 
 Each server is written as if it were the only one: it reads only its own configuration, and nothing
 changes when it shares a process with other servers. A server opens the queue its settings name;

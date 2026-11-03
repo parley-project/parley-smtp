@@ -80,7 +80,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	public static final String SUBMISSION_PREFIX = "parley.mail.submission";
 	/** The prefix of the properties of a submission server with implicit TLS (RFC 8314, port 465). */
 	public static final String SUBMISSIONS_PREFIX = "parley.mail.submissions";
-	/** A settings file for the servers' configuration (see parley-net's ServerLauncher). */
+	/** A settings file for the servers' configuration (the file its main reads, or a launcher's). */
 	public static final String CONFIG_PROP = SMTP_PREFIX + ".configFile";
 	/** The maildrop root, shared with POP3 and IMAP. */
 	public static final String ROOT_PROP = MAIL_ROOT_PROP;
@@ -166,13 +166,44 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	/**
 	 * Run the relay (parley.mail.smtp.port, default 25), submission (parley.mail.submission.port,
-	 * default 587) and submission with implicit TLS (parley.mail.submissions.port, default 465;
-	 * skipped with a warning while it has no TLS key store), until the process is stopped;
-	 * see {@link SmtpProviders} and parley-net's ServerMain.launch. Each server reads its own settings
-	 * with its prefix: parley.mail.smtp, parley.mail.submission and parley.mail.submissions.
+	 * default 587) and, when there is a TLS key store, submission with implicit TLS
+	 * (parley.mail.submissions.port, default 465) in this process until it is stopped, with
+	 * parley-net's ServerMain.run: the settings are parley-smtp.properties in the settings folder (or
+	 * the file parley.mail.smtp.configFile names) and the command line, read as system properties,
+	 * each server under its prefix. (The mail suite's servers are run by parley-mail-admin's launcher.)
 	 */
 	public static void main(String[] args) throws Exception {
-		ServerMain.launch("SmtpServer", args, "smtp", "submission", "submissions");
+		ServerMain.run("SmtpServer", args, CONFIG_PROP, "parley-smtp.properties", () -> {
+			java.util.List<ServerMain.Service> ret = new java.util.ArrayList<>();
+			{
+				int p = standalonePort(SMTP_PREFIX, SMTP_PORT);
+				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, false, false), "SMTP server"));
+			}
+			{
+				int p = standalonePort(SUBMISSION_PREFIX, SUBMISSION_PORT);
+				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, false, true), "Submission server"));
+			}
+			if (hasKeyStore(SUBMISSIONS_PREFIX)) {
+				int p = standalonePort(SUBMISSIONS_PREFIX, SUBMISSIONS_PORT);
+				ret.add(ServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)"));
+			} else {
+				System.err.println("Warning: Submission server (implicit TLS) is skipped: no TLS key store (set " + MAIL_TLS_KEY_STORE_PROP + " or " + SUBMISSIONS_PREFIX + ".keyStoreName)");
+			}
+			return ret;
+		});
+	}
+
+	/** A server's port in a standalone process: {@code <prefix>.port}, else its standard port */
+	private static int standalonePort(String prefix, int standard) {
+		String v = System.getProperty(prefix + ".port");
+		return v == null || v.trim().isEmpty() ? standard : Integer.parseInt(v.trim());
+	}
+
+	/** A TLS key store for this server in a standalone process: the suite's, or its own */
+	private static boolean hasKeyStore(String prefix) {
+		String a = System.getProperty(MAIL_TLS_KEY_STORE_PROP);
+		String b = System.getProperty(prefix + ".keyStoreName");
+		return (a != null && !a.trim().isEmpty()) || (b != null && !b.trim().isEmpty());
 	}
 
 	private void initMe() {
