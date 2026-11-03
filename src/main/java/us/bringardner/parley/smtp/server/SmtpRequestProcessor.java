@@ -133,7 +133,11 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		} catch (ConnectionLostException | SocketException e) {
 			// the client went away
 		} catch (Throwable e) {
-			logError("An error occurred in the SMTP session; closing the connection.", e);
+			if (isTlsHandshakeFailure(e)) {
+				logTlsHandshakeFailure(e);
+			} else {
+				logError("An error occurred in the SMTP session; closing the connection.", e);
+			}
 		} finally {
 			if (counted) {
 				getSmtpServer().getConnectionChecks().leave(getClientAddress());
@@ -209,6 +213,11 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		} catch (IllegalArgumentException e) {
 			error(PARAMETER_ERROR, "5.5.4", "Syntax error in parameters: " + sanitize(e.getMessage()));
 		} catch (IOException e) {
+			if (isTlsHandshakeFailure(e)) {
+				// STARTTLS: the client's handshake failed, and there's no connection left to answer on
+				logTlsHandshakeFailure(e);
+				throw new ConnectionLostException(e);
+			}
 			logError("Error in " + verb, e);
 			reply(LOCAL_ERROR, "4.3.0", "Local error in processing; try again later");
 		} catch (RuntimeException e) {
