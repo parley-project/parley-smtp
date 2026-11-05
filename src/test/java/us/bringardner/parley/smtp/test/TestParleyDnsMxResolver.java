@@ -103,9 +103,7 @@ public class TestParleyDnsMxResolver {
 		System.setProperty(DnsServer.PROP_PORT, String.valueOf(dnsPort));
 		System.setProperty(DnsServer.PROP_UDP_PORT, String.valueOf(dnsPort));
 		System.setProperty(DnsServer.PROP_TCP_PORT, String.valueOf(dnsPort));
-		System.setProperty(DnsServer.PROP_ADMIN_PORT, String.valueOf(freePort()));
 		System.setProperty(DnsServer.PROP_BIND_ADDRESS, "127.0.0.1");
-		System.setProperty(DnsServer.PROP_USE_DATABASE, "false");
 		dns = new DnsServer();
 		dns.start();
 		dns.awaitStarted(10000);
