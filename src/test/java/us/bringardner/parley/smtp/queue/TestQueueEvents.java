@@ -23,11 +23,9 @@ import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
-import us.bringardner.parley.net.server.FileBasedAcl.FileBasedPrincipal;
-import us.bringardner.parley.net.server.IAccessControlList;
-import us.bringardner.parley.net.server.IPermission;
-import us.bringardner.parley.net.server.IPrincipal;
-import us.bringardner.parley.net.server.IServer;
+import us.bringardner.parley.iam.BasicParleyPrincipal;
+import us.bringardner.parley.iam.BasicUserRegistry;
+import us.bringardner.parley.iam.EntityId;
 import us.bringardner.parley.smtp.MailAddress;
 
 /**
@@ -40,35 +38,14 @@ public class TestQueueEvents {
 	private MailQueue queue;
 	private final List<QueueEvent> events = new CopyOnWriteArrayList<>();
 
-	/** Users by name; a user may have a maildrop parameter. */
-	private static final class Users implements IAccessControlList {
-		final Map<String, IPrincipal> users = new HashMap<>();
-
+	/** Users by name; a user may have a maildrop attribute. */
+	private static final class Users extends BasicUserRegistry {
 		void add(String name, String maildrop) {
-			FileBasedPrincipal p = new FileBasedPrincipal(name);
+			Map<String, Object> attributes = new HashMap<>();
 			if (maildrop != null) {
-				p.setParameter(LocalDelivery.PARAMETER_MAILDROP, maildrop);
+				attributes.put(LocalDelivery.PARAMETER_MAILDROP, maildrop);
 			}
-			users.put(name, p);
-		}
-
-		@Override
-		public void initialize(IServer server) {
-		}
-
-		@Override
-		public boolean checkPermission(IPrincipal user, IPermission action) {
-			return false;
-		}
-
-		@Override
-		public IPrincipal getPrincipal(String user) {
-			return users.get(user);
-		}
-
-		@Override
-		public boolean verifyPassword(IPrincipal user, byte[] credentials) {
-			return false;
+			addPrincipal(new BasicParleyPrincipal(EntityId.of("user:" + name), name, false, attributes));
 		}
 	}
 
@@ -80,7 +57,7 @@ public class TestQueueEvents {
 		users.add("joe", null); // no domain: every local domain
 		DeliveryConfig c = new DeliveryConfig();
 		c.setMaildropRoot(root);
-		c.setAccessControl(users);
+		c.setUserRegistry(users);
 		c.getLocalDomains().clear();
 		c.addLocalDomain("a.test");
 		c.addLocalDomain("b.test");

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
+import us.bringardner.parley.iam.AuthenticationResult;
 import us.bringardner.parley.net.sasl.ISaslChannel;
 import us.bringardner.parley.net.sasl.ISaslMechanism;
 import us.bringardner.parley.net.sasl.SaslMechanisms;
@@ -16,7 +17,9 @@ import us.bringardner.parley.smtp.server.SmtpSaslAuthenticator;
  * AUTH mechanism [initial-response] (RFC 4954). The exchange itself is run by
  * {@link SaslServerDriver}; this class supplies the SMTP parts: the "334" continuations, "*" to
  * cancel, "=" for an empty response, and the replies. Which mechanisms are offered is decided by
- * {@link SmtpSaslAuthenticator} (PLAIN, RFC 4616, and LOGIN).
+ * {@link SmtpSaslAuthenticator} from what the server's user registry supports (PLAIN, RFC 4616,
+ * LOGIN, SCRAM-SHA-1 and SCRAM-SHA-256). A failed login is answered 535; one the registry couldn't
+ * check is answered 454 4.7.0 and isn't counted as a failed login.
  */
 public class Auth extends BaseCommand {
 
@@ -78,20 +81,10 @@ public class Auth extends BaseCommand {
 		switch (outcome.getStatus()) {
 		case SUCCESS:
 			// PLAIN and LOGIN logged in while checking the password; SCRAM proved the user without one
-			if (p.isAuthenticated() || p.loginVerified(outcome.getUser())) {
-				p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
-			} else if (p.isLoginUnavailable()) {
-				p.authUnavailable();
-			} else {
-				p.authFailed();
-			}
+			replyResult(p, p.isAuthenticated() ? authenticator.getResult() : authenticator.verified(outcome.getUser()));
 			break;
 		case FAILED:
-			if (authenticator.isUnavailable()) {
-				p.authUnavailable();
-			} else {
-				p.authFailed();
-			}
+			replyResult(p, authenticator.exchangeFailed("the " + mechanism.getName() + " exchange failed"));
 			break;
 		case CANCELLED:
 			p.error(PARAMETER_ERROR, "5.0.0", "Authentication cancelled");
@@ -103,6 +96,18 @@ public class Auth extends BaseCommand {
 			// CLOSED: the client went away
 			p.close();
 			break;
+		}
+	}
+
+	/** 235, 454 when the user registry couldn't answer (never 535 for that), or 535. */
+	private static void replyResult(SmtpRequestProcessor p, AuthenticationResult result) throws IOException {
+		AuthenticationResult.Status status = result == null ? AuthenticationResult.Status.REFUSED : result.getStatus();
+		if (status == AuthenticationResult.Status.AUTHENTICATED && p.isAuthenticated()) {
+			p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
+		} else if (status == AuthenticationResult.Status.UNAVAILABLE) {
+			p.authUnavailable();
+		} else {
+			p.authFailed();
 		}
 	}
 }

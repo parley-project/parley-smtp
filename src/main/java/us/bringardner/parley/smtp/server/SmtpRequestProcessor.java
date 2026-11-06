@@ -18,13 +18,13 @@ import java.util.Locale;
 import java.util.Map;
 
 import us.bringardner.parley.core.ILogger;
+import us.bringardner.parley.iam.AuthenticationResult;
+import us.bringardner.parley.iam.AuthorizationResult;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.mail.Rfc2822Date;
 import us.bringardner.parley.net.IConnection;
 import us.bringardner.parley.mail.server.AbstractMailProcessor;
 import us.bringardner.parley.net.server.ICommand;
-import us.bringardner.parley.net.server.AccessControlUnavailableException;
-import us.bringardner.parley.net.server.IPrincipal;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.SmtpInput;
@@ -173,6 +173,11 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			}
 			String line = new String(raw, StandardCharsets.UTF_8);
 			processLine(line, null);
+			if (!closing && isTooManyLoginFailures()) {
+				// the last failed login has been answered; say goodbye and close
+				logInfo("Too many failed logins, closing the connection from " + getClientAddress().getHostAddress());
+				replyTooManyLoginFailures();
+			}
 			if (!in.hasBuffered() || closing) {
 				flush();
 			}
@@ -526,77 +531,76 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		openStreams();
 		helo = null;
 		esmtp = false;
-		setPrincipal(null);
+		logout();
 		abortTransaction();
 	}
 
 	// ------------------------------------------------------------------ AUTH
 
-	private boolean loginUnavailable;
-
 	/**
-	 * Check a user name and password (SASLprep'd, RFC 4013). The user needs the
-	 * WRITE permission to send mail.
-	 */
-	public boolean login(String user, String password) {
-		loginUnavailable = false;
-		try {
-			return completeLogin(checkLogin(user, password));
-		} catch (AccessControlUnavailableException e) {
-			logError("Can't check the login of " + user + ": " + e.getMessage());
-			loginUnavailable = true;
-			return false;
-		}
-	}
-
-	/**
-	 * @return true if the last login failed because the access control list couldn't answer
-	 * (answer 454, try again later), not because of the credentials
-	 * @since 1.1.0
-	 */
-	public boolean isLoginUnavailable() {
-		return loginUnavailable;
-	}
-
-	/**
-	 * Log in a user a SASL mechanism has already proven (AUTH SCRAM-*): the same permission check
-	 * as {@link #login(String, String)}.
+	 * Log in with a user name and password (SASLprep'd, RFC 4013, by parley-mail). The user needs
+	 * the send permission ({@link SmtpCommand#SEND_PERMISSION}) too. Failed logins are counted, and
+	 * answered late, by parley-net.
 	 *
-	 * @since 1.1.0
+	 * @return AUTHENTICATED when the session is logged in; REFUSED for a wrong password, an unknown
+	 * user or a user who may not send mail (answer 535); UNAVAILABLE when the user registry can't
+	 * answer now (answer 454, try again later)
+	 * @throws IllegalStateException when the server has no user registry
+	 * @since 2.0.0 (returned a boolean)
 	 */
-	public boolean loginVerified(String user) {
-		loginUnavailable = false;
-		try {
-			return completeLogin(verifiedPrincipal(user));
-		} catch (AccessControlUnavailableException e) {
-			logError("Can't look up " + user + ": " + e.getMessage());
-			loginUnavailable = true;
-			return false;
+	public AuthenticationResult login(String user, String password) {
+		return checkSendPermission(authenticate(user, password));
+	}
+
+	/**
+	 * After a login: may the user send mail? Without the permission the session is logged out and
+	 * the login refused (counted like a wrong password, so the reply doesn't tell whether the
+	 * password was right); when the registry can't answer, logged out and UNAVAILABLE, never
+	 * refused.
+	 *
+	 * @param result how the login ended
+	 * @return the result to answer with
+	 */
+	AuthenticationResult checkSendPermission(AuthenticationResult result) {
+		if (result == null || result.getStatus() != AuthenticationResult.Status.AUTHENTICATED) {
+			return result;
+		}
+		AuthorizationResult allowed = checkPermission(SmtpCommand.SEND_PERMISSION, null);
+		switch (allowed.getStatus()) {
+		case ALLOWED:
+			return result;
+		case UNAVAILABLE:
+			logout();
+			logError("Can't check whether " + result.getPrincipal().getName() + " may send mail: " + allowed.getReason());
+			return AuthenticationResult.unavailable(allowed.getReason());
+		default:
+			logout();
+			return refuse(result.getPrincipal().getName() + " may not send mail");
 		}
 	}
 
-	/** Reply to an AUTH the access control list couldn't check: not counted as a failure (RFC 4954 454). */
+	/** Reply to an AUTH the user registry couldn't check: not counted as a failure (RFC 4954 454). */
 	public void authUnavailable() throws IOException {
 		reply(TEMP_AUTH_FAILURE, "4.7.0", "Temporary authentication failure, try again later");
 	}
 
-	private boolean completeLogin(IPrincipal p) {
-		if (p == null || !getServer().isAuthorized(p, SmtpCommand.SEND_PERMISSION)) {
-			return false;
+	/**
+	 * Reply to a failed AUTH. The failure has been counted by parley-net; the one too many gets no
+	 * 535, only the 421 goodbye ({@link #replyTooManyLoginFailures()}), and the connection is closed.
+	 */
+	public void authFailed() throws IOException {
+		if (isTooManyLoginFailures()) {
+			replyTooManyLoginFailures();
+			return;
 		}
-		setPrincipal(p);
-		return true;
+		reply(AUTH_FAILED, "5.7.8", "Authentication credentials invalid");
 	}
 
-	/** Reply to a failed AUTH; the connection is closed after too many. */
-	public void authFailed() throws IOException {
-		loginFailedDelay();
-		if (tooManyLoginFailures()) {
-			reply(SERVICE_NOT_AVAILABLE, "4.7.0", "Too many authentication failures");
-			closing = true;
-		} else {
-			reply(AUTH_FAILED, "5.7.8", "Authentication credentials invalid");
-		}
+	/** The goodbye after too many failed logins; the connection is closed after it. */
+	@Override
+	protected void replyTooManyLoginFailures() throws IOException {
+		reply(SERVICE_NOT_AVAILABLE, "4.7.0", "Too many authentication failures");
+		closing = true;
 	}
 
 	// ------------------------------------------------------------------ message content

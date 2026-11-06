@@ -91,6 +91,12 @@
 			<artifactId>parley-net</artifactId>
 			<version>${project.version}</version>
 		</dependency>
+		<!-- Used directly: users, logins and permissions (UserRegistry, ParleyPermission) -->
+		<dependency>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-iam</artifactId>
+			<version>${project.version}</version>
+		</dependency>
 		<!-- ParleyDnsMxResolver (MX lookups for the queue) and the DKIM, SPF, DMARC and ARC lookups -->
 		<dependency>
 			<groupId>us.bringardner.parley</groupId>

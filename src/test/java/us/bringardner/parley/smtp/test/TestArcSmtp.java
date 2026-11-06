@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 import us.bringardner.parley.core.ILogger.Level;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
-import us.bringardner.parley.net.server.FileBasedAcl;
+import us.bringardner.parley.net.server.FileUserRegistry;
 import us.bringardner.parley.net.server.IServer;
 import us.bringardner.parley.smtp.dkim.ArcResult;
 import us.bringardner.parley.smtp.dkim.DkimKeys;
@@ -45,8 +45,8 @@ public class TestArcSmtp {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		System.setProperty("parley.mail.smtp." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
-		System.setProperty("parley.mail.smtp." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
+		System.setProperty("parley.mail.smtp." + FileUserRegistry.PROP_FILE_NAME, ACL_FILE);
+		System.setProperty("parley.mail.smtp." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileUserRegistry.class.getName());
 		FileSourceFactory fs = FileSourceFactory.getDefaultFactory();
 		rootF = fs.createTempDirectory("arcF");
 		rootR = fs.createTempDirectory("arcR");

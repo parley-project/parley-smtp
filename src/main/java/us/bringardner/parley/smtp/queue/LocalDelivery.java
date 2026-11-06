@@ -12,8 +12,8 @@ import java.util.List;
 import java.util.Locale;
 
 import us.bringardner.parley.files.FileSource;
-import us.bringardner.parley.net.server.IAccessControlList;
-import us.bringardner.parley.net.server.IPrincipal;
+import us.bringardner.parley.iam.ParleyPrincipal;
+import us.bringardner.parley.iam.UserRegistry;
 import us.bringardner.parley.mail.store.MailStore;
 import us.bringardner.parley.mail.store.MailboxRegistry;
 import us.bringardner.parley.smtp.MailAddress;
@@ -21,12 +21,13 @@ import us.bringardner.parley.smtp.MailAddress;
 /**
  * Delivery to local users: the message goes into the user's INBOX, which is the
  * same directory the POP3 and IMAP servers use (the principal's
- * {@code maildrop} parameter, or the user name, under the maildrop root).
+ * {@code maildrop} attribute, or the user name, under the maildrop root). Users are
+ * looked up in the server's parley-iam user registry; a group is not a recipient.
  * IMAP sessions with INBOX selected see it at once.
  */
 public final class LocalDelivery {
 
-	/** Principal parameter naming the user's maildrop, as for POP3 and IMAP. */
+	/** The principal attribute naming the user's maildrop, as for POP3 and IMAP. */
 	public static final String PARAMETER_MAILDROP = "maildrop";
 
 	/** What a local part means here. */
@@ -130,20 +131,21 @@ public final class LocalDelivery {
 	}
 
 	private Target findUser(String name) throws IOException {
-		IAccessControlList acl = config.getAccessControl();
-		if (acl == null) {
+		UserRegistry registry = config.getUserRegistry();
+		if (registry == null) {
 			return null;
 		}
 		String lower = name.toLowerCase(Locale.ROOT);
-		// a list that can't answer throws (an IOException): the recipient is tried again later, not refused
-		IPrincipal p = acl.findPrincipal(name);
+		// a registry that can't answer throws (UserRegistryUnavailableException, an IOException): the
+		// recipient is tried again later, not refused
+		ParleyPrincipal p = registry.findPrincipal(name);
 		if (p == null && !lower.equals(name)) {
-			p = acl.findPrincipal(lower);
+			p = registry.findPrincipal(lower);
 		}
-		if (p == null) {
+		if (p == null || p.isGroup()) {
 			return null;
 		}
-		Object param = p.getParameter(PARAMETER_MAILDROP);
+		Object param = p.getAttribute(PARAMETER_MAILDROP);
 		return new Target(p.getName(), inbox(param != null ? param.toString() : p.getName()), null);
 	}
 
