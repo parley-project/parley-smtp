@@ -5,7 +5,7 @@ and mail transfer agent (RFC 5321). It receives mail, delivers it into the `parl
 same mailboxes `parley-imap` and `parley-pop3` serve), and relays mail for other domains through a
 persistent queue. It signs and checks DKIM, checks SPF and DMARC (with aggregate reports) and handles ARC.
 
-Requires Java 11 or later. Depends on `parley-mail`, `parley-net` and `parley-dns` (which bring in
+Requires Java 11 or later. Depends on `parley-mail`, `parley-net`, `parley-iam` and `parley-dns` (which bring in
 `parley-files`, `parley-core` and `parley-io`).
 
 ```xml
@@ -118,14 +118,34 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
   - Only CRLF `.` CRLF ends DATA, which defeats "SMTP smuggling". A `.` after a bare LF is content.
   - A message with more than 100 Received headers is refused as a loop.
   - HTTP requests are refused.
-  - The session closes after 20 errors or 3 failed logins.
+  - The session closes after 20 errors or after `maxLoginAttempts` failed logins (default 3; see [Users and logins](#users-and-logins)).
 
 ### Who can send what
 
 - **Mail for the local domains** (`domains`) is accepted from anyone, but only for existing users, aliases and `postmaster`. Unknown users get `550 5.1.1`. A `+detail` suffix is ignored when looking up the user.
-- **Mail for other domains** is accepted only from authenticated users (who need the WRITE permission) or from `parley.mail.smtp.relayNetworks`. Everyone else gets `550 5.7.1 Relay access denied`, so the server is not an open relay.
+- **Mail for other domains** is accepted only from authenticated users (who need the `write` permission) or from `parley.mail.smtp.relayNetworks`. Everyone else gets `550 5.7.1 Relay access denied`, so the server is not an open relay.
 - **Submission servers** (port 587/465) require AUTH and add `Date` and `Message-ID` when they're missing.
 - **requireTls:** with `parley.mail.smtp.requireTls`, AUTH is offered only after STARTTLS. It is off by default, as for POP3 and IMAP; turn it on for submission on a public network.
+
+### Users and logins
+
+Who may log in, and who the local users are, comes from a parley-iam `UserRegistry`: parley-mail's shared
+`parley.mail.users` file, one named with `parley.mail.smtp.authenticationProvider`, or one given with
+`setUserRegistry()`. A relay server with no registry still receives mail for aliases and `postmaster`, but no one can
+log in and there are no local users; AUTH with no registry is a configuration error, not a refused login.
+
+- **AUTH** (RFC 4954) offers PLAIN and LOGIN when the registry checks passwords, and SCRAM-SHA-256 and SCRAM-SHA-1
+  when it keeps SCRAM credentials for every user. Names and passwords are prepared with SASLprep (parley-mail).
+- **Sending needs the `write` permission** on the server as a whole (`SmtpCommand.SEND_PERMISSION`); the registry
+  decides who holds it. A user without it is refused like a wrong password.
+- **Replies:** `235 2.7.0` when logged in; `535 5.7.8` for bad credentials or a user who may not send; `454 4.7.0`
+  (temporary authentication failure, try again later) when the registry can't answer now, for the login or the
+  permission check. A `454` is never counted as a failed login.
+- **Failed logins are counted by parley-net**, which waits before the `535`; the one failed login too many
+  (`maxLoginAttempts`) gets `421 4.7.0 Too many authentication failures` and the connection is closed.
+- **Local recipients** are looked up in the same registry (by the full address, then the local part; a group is not a
+  recipient). The principal's `maildrop` attribute chooses the directory. A registry that can't answer gets
+  `451 4.3.0` (try again later), never "unknown user".
 
 ### The queue and delivery
 
@@ -133,7 +153,7 @@ The server follows RFC 5321 and its pending revision, draft-ietf-emailcore-rfc53
 - **Local delivery** goes into the user's INBOX, the same maildrop POP3 and IMAP use. It adds `Return-Path` and `Delivered-To`. IMAP sessions in the same process see the new message at once.
 - **History:** the queue writes every event (queued, delivered, deferred, failed, expanded, completed, deleted) as a JSON line to `<root>/.smtp-history/smtp-YYYY-MM-DD.jsonl` (`QueueHistory`; the queue settings `historyDirectory`, `historyDays`, default 30, and `history=false` to turn it off). The folder is on the mail root's file system (any FileSource), and each line is appended and the file closed again, so servers in several processes sharing a queue write the same files. The queue forgets a message once it is done; the history keeps what happened.
 - **Aliases:** `aliases` names a file of lines like `sales: tony, jose@example.org`. Members may be local users or remote addresses. Alias loops are stopped.
-- **Several domains (virtual domains):** list them all in `domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` parameter, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
+- **Several domains (virtual domains):** list them all in `domains`. An alias or user can belong to one domain: an alias line `sales@example.com: tony@example.com`, or a user named `tony@example.com` (give it the `maildrop` attribute, e.g. `example.com/tony`, to choose its directory). One without a domain gets mail for every local domain. Aliases are looked up before users (so an alias needs no user lookup), and the full address before the local part. Members of an alias without `@` take the alias's domain.
 - **Queue events and administration:** `MailQueue.addQueueListener` reports each message queued, each delivery attempt (DELIVERED, DEFERRED, FAILED, EXPANDED) and each message leaving the queue, so an application can keep a history. `getEntry`, `getContent`, `retry(id)`, `flush()` and `delete(id)` let an administrator look at and act on the messages waiting.
 - **Remote delivery:**
   - The queue looks up MX records. With no MX record it uses the domain's own address, and a null MX means the domain takes no mail.
@@ -287,7 +307,7 @@ There is no fallback from one prefix to another, and no setting is taken from an
 | `parley.mail.smtp.arc.verify` | true | Validate the ARC chains of incoming mail |
 | `parley.mail.smtp.serverId` | host, name and port | This server's id among those sharing the store |
 | `parley.mail.smtp.keyStoreName`, `parley.mail.smtp.keyStorePassword`, `parley.mail.smtp.keyStoreType` | none | Key store for STARTTLS and port 465 |
-| `parley.mail.smtp.*` | | Also the limits of parley-core's `AbstractCoreServer` (`maxConnections`, `maxLoginAttempts`, ...) and the access control list (`authenticationProvider`, `userFile`). |
+| `parley.mail.smtp.*` | | Also the limits of parley-core's `AbstractCoreServer` (`maxConnections`, `maxLoginAttempts`, ...) and the user registry (`authenticationProvider`, and its own settings, such as parley-net's `FileUserRegistry`'s `userFile`; or the suite's `parley.mail.users`). |
 
 Whether a server is a relay or a submission server comes from how it is made (its provider, or
 `new SmtpServer(port, name, secure, submission)`), never from a setting.

@@ -39,11 +39,22 @@ import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.core.ILogger.Level;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
+import us.bringardner.parley.iam.AuthenticationResult;
+import us.bringardner.parley.iam.AuthorizationResult;
+import us.bringardner.parley.iam.Credential;
+import us.bringardner.parley.iam.EntityId;
+import us.bringardner.parley.iam.ParleyPermission;
+import us.bringardner.parley.iam.ParleyPrincipal;
+import us.bringardner.parley.iam.ProtectedResource;
+import us.bringardner.parley.iam.Requester;
+import us.bringardner.parley.iam.StoredCredential;
+import us.bringardner.parley.iam.StoredCredentialType;
+import us.bringardner.parley.iam.UserRegistry;
+import us.bringardner.parley.iam.UserRegistryUnavailableException;
 import us.bringardner.parley.net.sasl.ISaslClient;
 import us.bringardner.parley.net.sasl.SaslException;
 import us.bringardner.parley.net.sasl.ScramMechanism;
-import us.bringardner.parley.net.server.FileBasedAcl;
-import us.bringardner.parley.net.server.IAccessControlList;
+import us.bringardner.parley.net.server.FileUserRegistry;
 import us.bringardner.parley.net.server.IServer;
 import us.bringardner.parley.mail.store.MailStore;
 import us.bringardner.parley.mail.store.Mailbox;
@@ -80,8 +91,8 @@ public class TestSmtpServer {
 			System.setProperty(prefix + ".keyStoreName", KEYSTORE);
 			System.setProperty(prefix + ".keyStorePassword", ServerTestSupport.KEYSTORE_PASSWORD);
 			System.setProperty(prefix + ".keyStoreType", "PKCS12");
-			System.setProperty(prefix + "." + FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
-			System.setProperty(prefix + "." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileBasedAcl.class.getName());
+			System.setProperty(prefix + "." + FileUserRegistry.PROP_FILE_NAME, ACL_FILE);
+			System.setProperty(prefix + "." + IServer.AUTHENTICATION_PROVIDER_PROPERTY, FileUserRegistry.class.getName());
 		}
 		FileSourceFactory f = FileSourceFactory.getDefaultFactory();
 		rootA = f.createTempDirectory("smtpA");
@@ -456,9 +467,9 @@ public class TestSmtpServer {
 			assertFalse(ehlo.contains("SCRAM"), ehlo);
 			assertTrue(c.cmd("AUTH SCRAM-SHA-256").startsWith("504"));
 		}
-		IAccessControlList acl = scramAcl();
-		IAccessControlList old = submission.getAccessControl();
-		submission.setAccessControl(acl);
+		UserRegistry acl = scramAcl();
+		UserRegistry old = submission.getUserRegistry();
+		submission.setUserRegistry(acl);
 		try {
 			try (Client c = new Client(submission.getLocalPort())) {
 				String ehlo = c.cmd("EHLO client.example");
@@ -481,14 +492,76 @@ public class TestSmtpServer {
 				assertTrue(c.cmd("MAIL FROM:<reader@a.test>").startsWith("530"), "not logged in");
 			}
 		} finally {
-			submission.setAccessControl(old);
+			submission.setUserRegistry(old);
+		}
+	}
+
+	/** scramAcl's users, but no permission check can be answered (a database outage, say). */
+	private static UserRegistry permissionsDown() {
+		UserRegistry users = scramAcl();
+		return new UserRegistry() {
+			@Override
+			public boolean supports(Class<? extends Credential> kind, StoredCredentialType stored) {
+				return users.supports(kind, stored);
+			}
+
+			@Override
+			public AuthenticationResult authenticate(Credential credential) {
+				return users.authenticate(credential);
+			}
+
+			@Override
+			public StoredCredential findStoredCredential(String user, StoredCredentialType type)
+					throws UserRegistryUnavailableException {
+				return users.findStoredCredential(user, type);
+			}
+
+			@Override
+			public ParleyPrincipal findPrincipal(String name) throws UserRegistryUnavailableException {
+				return users.findPrincipal(name);
+			}
+
+			@Override
+			public ParleyPrincipal findPrincipal(EntityId id) throws UserRegistryUnavailableException {
+				return users.findPrincipal(id);
+			}
+
+			@Override
+			public AuthorizationResult checkPermission(Requester requester, ParleyPermission needed,
+					ProtectedResource resource) {
+				return AuthorizationResult.unavailable("the database is down");
+			}
+		};
+	}
+
+	/** The send permission can't be checked: 454 4.7.0 (try again later), never 535, and not counted. */
+	@Test
+	public void testSendPermissionUnavailable() throws Exception {
+		UserRegistry old = submission.getUserRegistry();
+		submission.setUserRegistry(permissionsDown());
+		us.bringardner.parley.core.ILogger.Level level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(Level.NONE);
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.cmd("EHLO client.example");
+			for (int i = 0; i < 5; i++) {
+				String reply = c.cmd("AUTH PLAIN " + plain("carol", "carolpw"));
+				assertTrue(reply.startsWith("454 4.7.0"), reply);
+			}
+			String reply = scram(c, ScramMechanism.SHA_256, "carol", "carolpw");
+			assertTrue(reply.startsWith("454 4.7.0"), reply);
+			assertTrue(c.cmd("MAIL FROM:<carol@a.test>").startsWith("530"), "not logged in");
+			reply = c.cmd("AUTH PLAIN " + plain("carol", "wrong"));
+			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
+		} finally {
+			submission.setUserRegistry(old);
+			submission.getLogger().setLevel(level);
 		}
 	}
 
 	@Test
 	public void testAccessControlUnavailable() throws Exception {
-		IAccessControlList old = submission.getAccessControl();
-		submission.setAccessControl(downAcl());
+		UserRegistry old = submission.getUserRegistry();
+		submission.setUserRegistry(downAcl());
 		us.bringardner.parley.core.ILogger.Level level = submission.getLogger().getLevel();
 		submission.getLogger().setLevel(Level.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
@@ -500,13 +573,13 @@ public class TestSmtpServer {
 			String reply = scram(c, ScramMechanism.SHA_256, "tony", "secret");
 			assertTrue(reply.startsWith("454 4.7.0"), reply);
 		} finally {
-			submission.setAccessControl(old);
+			submission.setUserRegistry(old);
 			submission.getLogger().setLevel(level);
 		}
 		// a local recipient that can't be looked up is tried again later, not refused as unknown,
 		// and the cause is logged, since the reply doesn't give it
-		IAccessControlList delivery = a.getQueue().getConfig().getAccessControl();
-		a.getQueue().getConfig().setAccessControl(downAcl());
+		UserRegistry delivery = a.getQueue().getConfig().getUserRegistry();
+		a.getQueue().getConfig().setUserRegistry(downAcl());
 		IProcessorFactory factory = a.getProcessorFactory();
 		RecordingLogger log = new RecordingLogger();
 		a.setProcessorFactory(() -> {
@@ -521,7 +594,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("451 4.3.0"), reply);
 			assertTrue(c.cmd("RCPT TO:<sales@a.test>").startsWith("250"), "an alias needs no lookup");
 		} finally {
-			a.getQueue().getConfig().setAccessControl(delivery);
+			a.getQueue().getConfig().setUserRegistry(delivery);
 			a.setProcessorFactory(factory);
 		}
 		assertEquals(1, log.errors.size(), log.errors.toString());

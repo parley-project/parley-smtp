@@ -2,9 +2,9 @@ package us.bringardner.parley.smtp.server.commands;
 
 import java.io.IOException;
 
+import us.bringardner.parley.iam.ParleyPermission;
 import us.bringardner.parley.net.server.AbstractCommand;
 import us.bringardner.parley.net.server.ICommandProcessor;
-import us.bringardner.parley.net.server.IPermission;
 import us.bringardner.parley.net.server.IRequestContext;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.server.SmtpCommand;
@@ -28,7 +28,7 @@ public abstract class BaseCommand extends AbstractCommand implements SmtpCommand
 	}
 
 	@Override
-	public IPermission getPermission() {
+	public ParleyPermission getPermission() {
 		return SEND_PERMISSION;
 	}
 
