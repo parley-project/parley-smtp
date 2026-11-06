@@ -18,7 +18,6 @@ import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.mail.Message;
 import us.bringardner.parley.net.IProcessor;
 import us.bringardner.parley.net.IProcessorFactory;
-import us.bringardner.parley.net.server.IAccessControlList;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.dkim.Dkim;
@@ -222,9 +221,8 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 		readServerSettings();
 
-		IAccessControlList acl = getAccessControl();
-		if (acl == null) {
-			logInfo("No access control is configured for " + getName() + "; no one can log in and no local users exist");
+		if (getUserRegistry() == null) {
+			logInfo("No user registry is configured for " + getName() + "; no one can log in and no local users exist");
 		}
 	}
 
@@ -688,9 +686,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 		MailQueue q = getQueue();
 		if (ownsQueue) {
-			// a list the server made from its provider setting is closed when it stops and made
+			// a registry the server made from its provider setting is closed when it stops and made
 			// again at the next start: local delivery uses the one in use now
-			deliveryConfig.setAccessControl(getAccessControl());
+			deliveryConfig.setUserRegistry(getUserRegistry());
 		}
 		q.start();
 		queueStarted = true;
@@ -755,7 +753,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				java.util.Properties settings = MailQueue.readSettings(dir);
 				useQueueSettings(settings, dir);
 				deliveryConfig.setMaildropRoot(root);
-				deliveryConfig.setAccessControl(getAccessControl());
+				deliveryConfig.setUserRegistry(getUserRegistry());
 				QueueHistory history = QueueHistory.fromSettings(root, settings);
 				MailQueue made = new MailQueue(dir, deliveryConfig);
 				made.setReloader(() -> reloadQueueSettings(dir));

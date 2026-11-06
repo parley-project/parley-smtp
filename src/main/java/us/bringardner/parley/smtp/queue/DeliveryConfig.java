@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import us.bringardner.parley.files.FileSource;
-import us.bringardner.parley.net.server.IAccessControlList;
+import us.bringardner.parley.iam.UserRegistry;
 import us.bringardner.parley.smtp.dkim.Arc;
 import us.bringardner.parley.smtp.dkim.Dkim;
 import us.bringardner.parley.smtp.dkim.DkimSigner;
@@ -41,7 +41,7 @@ public class DeliveryConfig {
 	/** Replaced whole by {@link #setLocalDomains} (a reload), so a reader sees the old set or the new one */
 	private volatile Set<String> localDomains = new CopyOnWriteArraySet<>();
 	private FileSource maildropRoot;
-	private IAccessControlList accessControl;
+	private UserRegistry userRegistry;
 	/** Replaced whole by {@link #setAliases} (a reload), so a reader sees the old aliases or the new ones */
 	private volatile Map<String, List<String>> aliases = new ConcurrentHashMap<>();
 	private String postmaster = "postmaster";
@@ -152,12 +152,21 @@ public class DeliveryConfig {
 		this.maildropRoot = maildropRoot;
 	}
 
-	public IAccessControlList getAccessControl() {
-		return accessControl;
+	/**
+	 * @return the user registry local recipients are looked up in (the server's), or null when
+	 * there are no local users
+	 * @since 2.0.0 (was getAccessControl)
+	 */
+	public UserRegistry getUserRegistry() {
+		return userRegistry;
 	}
 
-	public void setAccessControl(IAccessControlList accessControl) {
-		this.accessControl = accessControl;
+	/**
+	 * @param userRegistry the user registry local recipients are looked up in, or null for none
+	 * @since 2.0.0 (was setAccessControl)
+	 */
+	public void setUserRegistry(UserRegistry userRegistry) {
+		this.userRegistry = userRegistry;
 	}
 
 	/** Aliases by lower-case local part: local user names or full addresses. */
