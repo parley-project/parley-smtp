@@ -2,6 +2,25 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-06: users, logins and permissions come from parley-iam)
+
+- **parley-smtp uses parley-iam and the new parley-net**: the server's user registry (a parley-iam `UserRegistry`,
+  from `parley.mail.users` or `authenticationProvider`) checks AUTH and is where local recipients are looked up.
+  `SmtpCommand.SEND_PERMISSION` is a `ParleyPermission` (`write`), and `BaseCommand.getPermission()` returns one.
+- **AUTH replies**: `535 5.7.8` for bad credentials or a user without the send permission; `454 4.7.0` when the
+  registry can't answer now, for the login or for the send-permission check (never `535` for that, and not counted).
+- **Failed logins are counted by parley-net** (the session's login limits: the delay before the `535`, and the
+  `421 4.7.0` close after `maxLoginAttempts`, now sent from `replyTooManyLoginFailures()`). Removed: SMTP's own
+  counting and `loginFailedDelay()` calls.
+- **`SmtpSaslAuthenticator` extends parley-mail's `MailSaslAuthenticator`** and adds the send-permission check; a
+  SCRAM login is finished with its `verified(user)`, and a failed exchange is counted with `exchangeFailed(reason)`.
+- **`SmtpRequestProcessor.login(user, password)` returns an `AuthenticationResult`** (it returned a boolean).
+  Removed: `loginVerified(String)` (use `SmtpSaslAuthenticator.verified`) and `isLoginUnavailable()` (the
+  UNAVAILABLE result replaces it).
+- **`DeliveryConfig.getUserRegistry()` / `setUserRegistry(UserRegistry)`** replace `getAccessControl()` /
+  `setAccessControl(IAccessControlList)`. Local delivery reads the `maildrop` attribute of the principal (it was a
+  parameter); a group is not a recipient.
+
 
 ### Changed (2026-11-03: To-Do 15.3)
 

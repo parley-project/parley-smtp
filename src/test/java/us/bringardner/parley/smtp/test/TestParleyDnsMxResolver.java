@@ -279,9 +279,9 @@ public class TestParleyDnsMxResolver {
 		us.bringardner.parley.files.FileSourceFactory f = us.bringardner.parley.files.FileSourceFactory.getDefaultFactory();
 		us.bringardner.parley.files.FileSource rootA = f.createTempDirectory("dnsA");
 		us.bringardner.parley.files.FileSource rootB = f.createTempDirectory("dnsB");
-		System.setProperty("parley.mail.smtp." + us.bringardner.parley.net.server.FileBasedAcl.PROP_FILE_NAME, ACL_FILE);
+		System.setProperty("parley.mail.smtp." + us.bringardner.parley.net.server.FileUserRegistry.PROP_FILE_NAME, ACL_FILE);
 		System.setProperty("parley.mail.smtp." + us.bringardner.parley.net.server.IServer.AUTHENTICATION_PROVIDER_PROPERTY,
-				us.bringardner.parley.net.server.FileBasedAcl.class.getName());
+				us.bringardner.parley.net.server.FileUserRegistry.class.getName());
 		us.bringardner.parley.smtp.server.SmtpServer b = new us.bringardner.parley.smtp.server.SmtpServer(0, "JSmtp", false);
 		us.bringardner.parley.smtp.server.SmtpServer a = new us.bringardner.parley.smtp.server.SmtpServer(0, "JSmtp", false);
 		try {
