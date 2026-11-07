@@ -492,9 +492,9 @@ public class TestSmtpServer {
 				c.cmd("EHLO client.example");
 				// the password is right, so the login stands; sending is refused, saying why
 				String reply = scram(c, ScramMechanism.SHA_256, "reader", "pw");
-				assertTrue(reply.startsWith("235 2.7.0 Authentication successful, but reader doesn't have the write permission (needed for sending mail)"), reply);
+				assertTrue(reply.startsWith("235 2.7.0 Authentication successful, but reader doesn't have the write permission"), reply);
 				reply = c.cmd("MAIL FROM:<reader@a.test>");
-				assertTrue(reply.startsWith("550 5.7.1 MAIL refused: reader doesn't have the write permission (needed for sending mail)"), reply);
+				assertTrue(reply.startsWith("550 5.7.1 MAIL refused: reader doesn't have the write permission"), reply);
 			}
 		} finally {
 			submission.setUserRegistry(old);

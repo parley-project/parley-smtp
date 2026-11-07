@@ -53,7 +53,7 @@ public class Mail extends BaseCommand {
 			}
 			if (send.getStatus() != AuthorizationResult.Status.ALLOWED) {
 				p.error(MAILBOX_UNAVAILABLE, "5.7.1", "MAIL refused: "
-						+ p.permissionMissing("MAIL", SmtpCommand.SEND_PERMISSION, "sending mail"));
+						+ p.reportMissingPermission("MAIL", SmtpCommand.SEND_PERMISSION));
 				return;
 			}
 		}
