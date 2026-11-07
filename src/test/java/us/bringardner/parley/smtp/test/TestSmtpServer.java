@@ -553,7 +553,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("235 2.7.0"), reply);
 			for (int i = 0; i < 5; i++) {
 				reply = c.cmd("MAIL FROM:<carol@a.test>");
-				assertTrue(reply.startsWith("451 4.7.0"), reply);
+				assertTrue(reply.startsWith("451 4.7.0 The write permission can't be checked now"), reply);
 			}
 		}
 		try (Client c = new Client(submission.getLocalPort())) {

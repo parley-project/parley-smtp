@@ -48,7 +48,7 @@ public class Mail extends BaseCommand {
 			AuthorizationResult send = p.checkSend();
 			if (send.getStatus() == AuthorizationResult.Status.UNAVAILABLE) {
 				p.logError("Can't check whether " + p.getPrincipal().getName() + " may send mail: " + send.getReason());
-				p.error(LOCAL_ERROR, "4.7.0", "The send permission can't be checked now, try again later");
+				p.error(LOCAL_ERROR, "4.7.0", "The " + SmtpCommand.SEND_PERMISSION.getName() + " permission can't be checked now, try again later");
 				return;
 			}
 			if (send.getStatus() != AuthorizationResult.Status.ALLOWED) {
