@@ -376,6 +376,28 @@ public class TestSmtpServer {
 		}
 	}
 
+	/** A group's name is no mailbox: RCPT to it is refused like an unknown user's. */
+	@Test
+	public void testGroupIsNoRecipient() throws Exception {
+		// nothing from earlier tests may be delivered while the queue has this registry
+		reset(rootA, "staff");
+		UserRegistry delivery = a.getQueue().getConfig().getUserRegistry();
+		a.getQueue().getConfig().setUserRegistry(new FileUserRegistry() {
+			{
+				parseLine("tony, secret, READ|WRITE, groups=staff");
+			}
+		});
+		try (Client c = new Client(a.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("MAIL FROM:<x@ext.test>", "250");
+			String reply = c.cmd("RCPT TO:<staff@a.test>");
+			assertTrue(reply.startsWith("550 5.1.1"), reply);
+			c.ok("RCPT TO:<tony@a.test>", "250");
+		} finally {
+			a.getQueue().getConfig().setUserRegistry(delivery);
+		}
+	}
+
 	@Test
 	public void testLocalDelivery() throws Exception {
 		reset(rootA, "tony");
