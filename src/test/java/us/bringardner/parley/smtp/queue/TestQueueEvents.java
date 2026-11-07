@@ -23,9 +23,9 @@ import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
-import us.bringardner.parley.iam.BasicParleyPrincipal;
-import us.bringardner.parley.iam.BasicUserRegistry;
 import us.bringardner.parley.iam.EntityId;
+import us.bringardner.parley.iam.principal.BasicParleyPrincipal;
+import us.bringardner.parley.iam.registry.BasicUserRegistry;
 import us.bringardner.parley.smtp.MailAddress;
 
 /**
