@@ -138,11 +138,12 @@ public final class LocalDelivery {
 		String lower = name.toLowerCase(Locale.ROOT);
 		// a registry that can't answer throws (UserRegistryUnavailableException, an IOException): the
 		// recipient is tried again later, not refused
-		ParleyPrincipal p = registry.findPrincipal(name);
+		// a group's name is no mailbox: findUser leaves groups out
+		ParleyPrincipal p = registry.findUser(name);
 		if (p == null && !lower.equals(name)) {
-			p = registry.findPrincipal(lower);
+			p = registry.findUser(lower);
 		}
-		if (p == null || p.isGroup()) {
+		if (p == null) {
 			return null;
 		}
 		Object param = p.getAttribute(PARAMETER_MAILDROP);
