@@ -8,7 +8,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
-import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -22,9 +21,10 @@ import us.bringardner.parley.iam.AuthenticationResult;
 import us.bringardner.parley.iam.AuthorizationResult;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.mail.Rfc2822Date;
-import us.bringardner.parley.net.IConnection;
 import us.bringardner.parley.mail.server.AbstractMailProcessor;
+import us.bringardner.parley.net.server.ConnectionLostException;
 import us.bringardner.parley.net.server.ICommand;
+import us.bringardner.parley.net.server.IRequestContext;
 import us.bringardner.parley.smtp.MailAddress;
 import us.bringardner.parley.smtp.SMTP;
 import us.bringardner.parley.smtp.SmtpInput;
@@ -63,15 +63,6 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	private static final int MAX_ERRORS = 20;
 	private static final int POLL_INTERVAL = 1000;
 	private static final SecureRandom RANDOM = new SecureRandom();
-
-	/** The connection is gone (as opposed to a failure in the queue). */
-	static final class ConnectionLostException extends IOException {
-		private static final long serialVersionUID = 1L;
-
-		ConnectionLostException(IOException cause) {
-			super(cause.getMessage(), cause);
-		}
-	}
 
 	/** A mail transaction: MAIL, RCPTs and content (RFC 5321 section 3.3). */
 	public static final class Transaction {
@@ -118,78 +109,86 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 
 	// ------------------------------------------------------------------ session loop
 
+	/** The checks of the client when it connects, then the 220 greeting; a refused client gets its reply and the session ends. */
 	@Override
-	public void run() {
-		running = true;
-		IConnection con = getConnection();
-		try {
-			openStreams();
-			if (!admit()) {
-				return;
-			}
-			reply(SERVICE_READY, null, getSmtpServer().getHostname() + " ESMTP Parley ready");
-			flush();
-			loop();
-		} catch (ConnectionLostException | SocketException e) {
-			// the client went away
-		} catch (Throwable e) {
-			if (isTlsHandshakeFailure(e)) {
-				logTlsHandshakeFailure(e);
-			} else {
-				logError("An error occurred in the SMTP session; closing the connection.", e);
-			}
-		} finally {
-			if (counted) {
-				getSmtpServer().getConnectionChecks().leave(getClientAddress());
-			}
-			abortTransaction();
-			running = false;
-			try {
-				getServer().removeClient(this);
-			} catch (RuntimeException e) {
-				// ignore
-			}
-			IoUtils.closeQuietly(con);
+	protected void sendGreeting() throws IOException {
+		openStreams();
+		if (!admit()) {
+			return;
 		}
+		reply(SERVICE_READY, null, getSmtpServer().getHostname() + " ESMTP Parley ready");
+		flush();
 	}
 
-	private void loop() throws IOException {
-		while (running && !stopping && !closing) {
+	/**
+	 * One command line, read as bytes up to {@link #MAX_COMMAND_LINE} and decoded as UTF-8. A line
+	 * that is too long is answered (500 5.5.6) and the next one read. While the client sends
+	 * nothing the read waits (until the session times out or the server stops); then the session ends with 421:
+	 * 4.4.2 when the client was idle too long, 4.3.2 when the server is stopping.
+	 */
+	@Override
+	protected IRequestContext readRequest() throws IOException {
+		while (true) {
 			byte[] raw;
 			try {
 				raw = in.readLine(MAX_COMMAND_LINE);
 			} catch (SocketTimeoutException e) {
-				if (!stopping) {
-					reply(SERVICE_NOT_AVAILABLE, "4.4.2", getSmtpServer().getHostname() + " Error: timeout exceeded");
-					flush();
+				if (stopping) {
+					replyClosing(us.bringardner.parley.net.server.CloseReason.SERVER_STOPPING);
+				} else {
+					replyClosing(us.bringardner.parley.net.server.CloseReason.IDLE);
 				}
-				return;
+				return null;
 			} catch (LineTooLongException e) {
 				error(SYNTAX_ERROR, "5.5.6", "Line too long");
+				if (closing) {
+					flush();
+					return null;
+				}
+				if (!in.hasBuffered()) {
+					flush();
+				}
 				continue;
 			}
 			if (raw == null) {
-				return;
+				return null;
 			}
-			String line = new String(raw, StandardCharsets.UTF_8);
-			processLine(line, null);
-			if (!closing && isTooManyLoginFailures()) {
-				// the last failed login has been answered; say goodbye and close
-				logInfo("Too many failed logins, closing the connection from " + getClientAddress().getHostAddress());
-				replyTooManyLoginFailures();
-			}
-			if (!in.hasBuffered() || closing) {
-				flush();
-			}
+			return getRequestContextFactory().getRequestContext(new String(raw, StandardCharsets.UTF_8));
 		}
-		if (stopping && !closing) {
-			reply(SERVICE_NOT_AVAILABLE, "4.3.2", getSmtpServer().getHostname() + " Service shutting down");
+	}
+
+	/** Replies are sent when the client has sent nothing more (pipelining, RFC 2920), or the session is closing. */
+	@Override
+	protected void afterRequest() throws IOException {
+		if (!in.hasBuffered() || closing) {
 			flush();
 		}
 	}
 
+	/** True once a 421 has been sent (too many errors or failed logins, a refused client, QUIT, the server closing it). */
 	@Override
-	protected void processLine(String line, Map<String, String> cmdUsed) throws IOException {
+	protected boolean isSessionEnding() {
+		return closing;
+	}
+
+	/** Leave the per-address counts and drop an unfinished mail transaction. */
+	@Override
+	protected void sessionEnded() {
+		if (counted) {
+			getSmtpServer().getConnectionChecks().leave(getClientAddress());
+		}
+		abortTransaction();
+	}
+
+	/** A command failed with an unexpected error (already logged): 451 4.3.0; the session goes on. */
+	@Override
+	protected void replyCommandFailed(IRequestContext request) throws IOException {
+		reply(LOCAL_ERROR, "4.3.0", "Local error in processing; try again later");
+	}
+
+	@Override
+	protected void runRequest(IRequestContext request) throws IOException {
+		String line = request.getCommandLine();
 		int sp = line.indexOf(' ');
 		String verb = (sp < 0 ? line : line.substring(0, sp)).toUpperCase(Locale.ROOT);
 		String args = sp < 0 ? "" : line.substring(sp + 1);
@@ -211,6 +210,7 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			error(SYNTAX_ERROR, "5.5.2", "Command unrecognized: " + sanitize(verb));
 			return;
 		}
+		recordCommandUsed(command.getName());
 		try {
 			((SmtpCommand) command).execute(this, args);
 		} catch (ConnectionLostException e) {
@@ -219,13 +219,10 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			error(PARAMETER_ERROR, "5.5.4", "Syntax error in parameters: " + sanitize(e.getMessage()));
 		} catch (IOException e) {
 			if (isTlsHandshakeFailure(e)) {
-				// STARTTLS: the client's handshake failed, and there's no connection left to answer on
-				logTlsHandshakeFailure(e);
+				// STARTTLS: the client's handshake failed, and there's no connection left to answer on;
+				// the session loop ends the session and logs the failed handshake (one INFO line)
 				throw new ConnectionLostException(e);
 			}
-			logError("Error in " + verb, e);
-			reply(LOCAL_ERROR, "4.3.0", "Local error in processing; try again later");
-		} catch (RuntimeException e) {
 			logError("Error in " + verb, e);
 			reply(LOCAL_ERROR, "4.3.0", "Local error in processing; try again later");
 		}
