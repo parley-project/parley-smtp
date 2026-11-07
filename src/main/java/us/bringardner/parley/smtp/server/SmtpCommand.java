@@ -2,9 +2,9 @@ package us.bringardner.parley.smtp.server;
 
 import java.io.IOException;
 
-import us.bringardner.parley.iam.BasicParleyPermission;
 import us.bringardner.parley.iam.ParleyPermission;
-import us.bringardner.parley.iam.StandardPermissions;
+import us.bringardner.parley.iam.permission.BasicParleyPermission;
+import us.bringardner.parley.iam.permission.StandardPermissions;
 import us.bringardner.parley.net.server.ICommand;
 
 /**
