@@ -35,37 +35,31 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
-import us.bringardner.parley.iam.AuthenticationResult;
 import us.bringardner.parley.iam.AuthorizationResult;
-import us.bringardner.parley.iam.Credential;
-import us.bringardner.parley.iam.EntityId;
 import us.bringardner.parley.iam.ParleyPermission;
-import us.bringardner.parley.iam.ParleyPrincipal;
 import us.bringardner.parley.iam.ProtectedResource;
 import us.bringardner.parley.iam.Requester;
-import us.bringardner.parley.iam.StoredCredential;
-import us.bringardner.parley.iam.StoredCredentialType;
 import us.bringardner.parley.iam.UserRegistry;
-import us.bringardner.parley.iam.UserRegistryUnavailableException;
+import us.bringardner.parley.iam.registry.ForwardingUserRegistry;
+import us.bringardner.parley.mail.store.MailStore;
+import us.bringardner.parley.mail.store.Mailbox;
+import us.bringardner.parley.mail.store.MailboxRegistry;
+import us.bringardner.parley.net.IProcessorFactory;
+import us.bringardner.parley.net.ServerTestSupport;
 import us.bringardner.parley.net.sasl.ISaslClient;
 import us.bringardner.parley.net.sasl.SaslException;
 import us.bringardner.parley.net.sasl.ScramMechanism;
 import us.bringardner.parley.net.server.FileUserRegistry;
 import us.bringardner.parley.net.server.IServer;
-import us.bringardner.parley.mail.store.MailStore;
-import us.bringardner.parley.mail.store.Mailbox;
-import us.bringardner.parley.mail.store.MailboxRegistry;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.queue.DeliveryException;
 import us.bringardner.parley.smtp.queue.MxResolver;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 import us.bringardner.parley.smtp.server.SmtpServer;
-import us.bringardner.parley.net.IProcessorFactory;
-import us.bringardner.parley.net.ServerTestSupport;
 
 /**
  * End-to-end tests of SmtpServer over real sockets. Server A (domain a.test)
@@ -503,34 +497,7 @@ public class TestSmtpServer {
 
 	/** scramAcl's users, but no permission check can be answered (a database outage, say). */
 	private static UserRegistry permissionsDown() {
-		UserRegistry users = scramAcl();
-		return new UserRegistry() {
-			@Override
-			public boolean supports(Class<? extends Credential> kind, StoredCredentialType stored) {
-				return users.supports(kind, stored);
-			}
-
-			@Override
-			public AuthenticationResult authenticate(Credential credential) {
-				return users.authenticate(credential);
-			}
-
-			@Override
-			public StoredCredential findStoredCredential(String user, StoredCredentialType type)
-					throws UserRegistryUnavailableException {
-				return users.findStoredCredential(user, type);
-			}
-
-			@Override
-			public ParleyPrincipal findPrincipal(String name) throws UserRegistryUnavailableException {
-				return users.findPrincipal(name);
-			}
-
-			@Override
-			public ParleyPrincipal findPrincipal(EntityId id) throws UserRegistryUnavailableException {
-				return users.findPrincipal(id);
-			}
-
+		return new ForwardingUserRegistry(scramAcl()) {
 			@Override
 			public AuthorizationResult checkPermission(Requester requester, ParleyPermission needed,
 					ProtectedResource resource) {
