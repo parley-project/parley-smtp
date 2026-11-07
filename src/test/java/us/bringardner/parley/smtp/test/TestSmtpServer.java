@@ -950,6 +950,8 @@ public class TestSmtpServer {
 			assertTrue(sub.cmd("EHLO client.example").startsWith("250"));
 			assertTrue(mx.cmd("EHLO client.example").startsWith("250"));
 			Thread.sleep(1000);
+			// told why (421 4.4.2), then closed
+			assertEquals("421 4.4.2 mx.a.test Error: no login in time", sub.line());
 			assertNull(sub.line(), "submission without a login is closed after the limit");
 			assertTrue(mx.cmd("NOOP").startsWith("250"), "receiving mail needs no login");
 		} finally {
