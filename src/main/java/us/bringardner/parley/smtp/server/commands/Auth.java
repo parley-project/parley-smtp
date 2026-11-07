@@ -8,18 +8,21 @@ import us.bringardner.parley.iam.AuthenticationResult;
 import us.bringardner.parley.net.sasl.ISaslChannel;
 import us.bringardner.parley.net.sasl.ISaslMechanism;
 import us.bringardner.parley.net.sasl.SaslMechanisms;
-import us.bringardner.parley.net.sasl.SaslOutcome;
 import us.bringardner.parley.net.sasl.SaslServerDriver;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
-import us.bringardner.parley.smtp.server.SmtpSaslAuthenticator;
+import us.bringardner.parley.iam.AuthorizationResult;
+import us.bringardner.parley.mail.server.MailSaslAuthenticator;
+import us.bringardner.parley.smtp.server.SmtpCommand;
 
 /**
- * AUTH mechanism [initial-response] (RFC 4954). The exchange itself is run by
- * {@link SaslServerDriver}; this class supplies the SMTP parts: the "334" continuations, "*" to
+ * AUTH mechanism [initial-response] (RFC 4954). The exchange itself is run by the authenticator
+ * (parley-net's {@link SaslServerDriver} underneath); this class supplies the SMTP parts: the "334" continuations, "*" to
  * cancel, "=" for an empty response, and the replies. Which mechanisms are offered is decided by
- * {@link SmtpSaslAuthenticator} from what the server's user registry supports (PLAIN, RFC 4616,
+ * parley-mail's {@link MailSaslAuthenticator} from what the server's user registry supports (PLAIN, RFC 4616,
  * LOGIN, SCRAM-SHA-1 and SCRAM-SHA-256). A failed login is answered 535; one the registry couldn't
- * check is answered 454 4.7.0 and isn't counted as a failed login.
+ * check is answered 454 4.7.0 and isn't counted as a failed login. The send permission isn't
+ * part of logging in: a user without it is logged in, told so in the 235 reply, and refused at
+ * MAIL FROM.
  */
 public class Auth extends BaseCommand {
 
@@ -37,7 +40,7 @@ public class Auth extends BaseCommand {
 	 *         be used before TLS is a policy of the server (require TLS), checked by the caller.
 	 */
 	public static List<String> mechanisms(SmtpRequestProcessor p) {
-		return MECHANISMS.offered(new SmtpSaslAuthenticator(p), true);
+		return MECHANISMS.offered(p.newSaslAuthenticator(), true);
 	}
 
 	@Override
@@ -61,13 +64,13 @@ public class Auth extends BaseCommand {
 		String[] a = args.trim().split(" +");
 		String name = a[0].toUpperCase(Locale.ROOT);
 		String initial = a.length > 1 ? a[1] : null;
-		SmtpSaslAuthenticator authenticator = new SmtpSaslAuthenticator(p);
+		MailSaslAuthenticator authenticator = p.newSaslAuthenticator();
 		ISaslMechanism mechanism = MECHANISMS.find(name);
 		if (mechanism == null || !MECHANISMS.offered(authenticator, true).contains(mechanism.getName())) {
 			p.error(PARAMETER_NOT_IMPLEMENTED, "5.5.4", "Unrecognized authentication type");
 			return;
 		}
-		SaslOutcome outcome = SaslServerDriver.authenticate(mechanism, authenticator, initial, new ISaslChannel() {
+		AuthenticationResult result = authenticator.authenticate(mechanism, initial, new ISaslChannel() {
 			@Override
 			public void sendChallenge(String base64) throws IOException {
 				p.reply(AUTH_CONTINUE + " " + base64);
@@ -78,14 +81,12 @@ public class Auth extends BaseCommand {
 				return p.readLine();
 			}
 		});
-		switch (outcome.getStatus()) {
-		case SUCCESS:
-			// PLAIN and LOGIN logged in while checking the password; SCRAM proved the user without one
-			replyResult(p, p.isAuthenticated() ? authenticator.getResult() : authenticator.verified(outcome.getUser()));
-			break;
-		case FAILED:
-			replyResult(p, authenticator.exchangeFailed("the " + mechanism.getName() + " exchange failed"));
-			break;
+		if (result != null) {
+			// a login was checked, and a refusal already counted
+			replyResult(p, result);
+			return;
+		}
+		switch (authenticator.getOutcome().getStatus()) {
 		case CANCELLED:
 			p.error(PARAMETER_ERROR, "5.0.0", "Authentication cancelled");
 			break;
@@ -103,7 +104,11 @@ public class Auth extends BaseCommand {
 	private static void replyResult(SmtpRequestProcessor p, AuthenticationResult result) throws IOException {
 		AuthenticationResult.Status status = result == null ? AuthenticationResult.Status.REFUSED : result.getStatus();
 		if (status == AuthenticationResult.Status.AUTHENTICATED && p.isAuthenticated()) {
-			p.reply(AUTH_SUCCEEDED, "2.7.0", "Authentication successful");
+			// logged in; without the send permission the user is told now, and MAIL FROM is refused
+			String missing = p.checkSend().getStatus() == AuthorizationResult.Status.DENIED
+					? p.permissionMissing("AUTH", SmtpCommand.SEND_PERMISSION, "sending mail") : null;
+			p.reply(AUTH_SUCCEEDED, "2.7.0", missing == null ? "Authentication successful"
+					: "Authentication successful, but " + missing);
 		} else if (status == AuthenticationResult.Status.UNAVAILABLE) {
 			p.authUnavailable();
 		} else {

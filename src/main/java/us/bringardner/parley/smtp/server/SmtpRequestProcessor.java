@@ -483,7 +483,8 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 
 	/** True if the client may send to non-local domains. */
 	public boolean mayRelay() {
-		return isAuthenticated() || getSmtpServer().isRelayAllowed(getClientAddress());
+		// logged in is not enough: the user needs the send permission too
+		return checkSend().getStatus() == AuthorizationResult.Status.ALLOWED || getSmtpServer().isRelayAllowed(getClientAddress());
 	}
 
 	public Transaction getTransaction() {
@@ -538,45 +539,32 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	// ------------------------------------------------------------------ AUTH
 
 	/**
-	 * Log in with a user name and password (SASLprep'd, RFC 4013, by parley-mail). The user needs
-	 * the send permission ({@link SmtpCommand#SEND_PERMISSION}) too. Failed logins are counted, and
-	 * answered late, by parley-net.
+	 * Log in with a user name and password (SASLprep'd, RFC 4013, by parley-mail). Failed logins
+	 * are counted, and answered late, by parley-net. The send permission isn't part of logging in:
+	 * MAIL FROM and relaying need it ({@link #checkSend()}).
 	 *
-	 * @return AUTHENTICATED when the session is logged in; REFUSED for a wrong password, an unknown
-	 * user or a user who may not send mail (answer 535); UNAVAILABLE when the user registry can't
-	 * answer now (answer 454, try again later)
+	 * @return AUTHENTICATED when the session is logged in; REFUSED for a wrong password or an
+	 * unknown user (answer 535); UNAVAILABLE when the user registry can't answer now (answer 454,
+	 * try again later)
 	 * @throws IllegalStateException when the server has no user registry
 	 * @since 2.0.0 (returned a boolean)
 	 */
 	public AuthenticationResult login(String user, String password) {
-		return checkSendPermission(authenticate(user, password));
+		return authenticate(user, password);
 	}
 
 	/**
-	 * After a login: may the user send mail? Without the permission the session is logged out and
-	 * the login refused (counted like a wrong password, so the reply doesn't tell whether the
-	 * password was right); when the registry can't answer, logged out and UNAVAILABLE, never
-	 * refused.
+	 * May the logged-in user send mail (the send permission, {@link SmtpCommand#SEND_PERMISSION})?
+	 * MAIL FROM asks, and relaying is allowed only with it.
 	 *
-	 * @param result how the login ended
-	 * @return the result to answer with
+	 * @return ALLOWED, DENIED (also when nobody is logged in) or UNAVAILABLE
+	 * @since 2.0.0
 	 */
-	AuthenticationResult checkSendPermission(AuthenticationResult result) {
-		if (result == null || result.getStatus() != AuthenticationResult.Status.AUTHENTICATED) {
-			return result;
+	public AuthorizationResult checkSend() {
+		if (!isAuthenticated()) {
+			return AuthorizationResult.denied("nobody is logged in");
 		}
-		AuthorizationResult allowed = checkPermission(SmtpCommand.SEND_PERMISSION, null);
-		switch (allowed.getStatus()) {
-		case ALLOWED:
-			return result;
-		case UNAVAILABLE:
-			logout();
-			logError("Can't check whether " + result.getPrincipal().getName() + " may send mail: " + allowed.getReason());
-			return AuthenticationResult.unavailable(allowed.getReason());
-		default:
-			logout();
-			return refuse(result.getPrincipal().getName() + " may not send mail");
-		}
+		return checkPermission(SmtpCommand.SEND_PERMISSION, null);
 	}
 
 	/** Reply to an AUTH the user registry couldn't check: not counted as a failure (RFC 4954 454). */
