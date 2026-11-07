@@ -584,6 +584,33 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		reply(AUTH_FAILED, "5.7.8", "Authentication credentials invalid");
 	}
 
+	/**
+	 * The server is closing this session on its own (parley-net's idle check, its login time
+	 * limit, or the server stopping): 421 with RFC 3463's 4.4.2 (timeout) or 4.3.2 (shutting
+	 * down), as the session's own read timeout and stop already answer. It used to be closed
+	 * with no reply.
+	 */
+	@Override
+	public void replyClosing(us.bringardner.parley.net.server.CloseReason reason) throws IOException {
+		if (closing) {
+			return; // already said goodbye
+		}
+		closing = true;
+		String host = getSmtpServer().getHostname();
+		switch (reason) {
+			case SERVER_STOPPING:
+				reply(SERVICE_NOT_AVAILABLE, "4.3.2", host + " Service shutting down");
+				break;
+			case LOGIN_TIME_LIMIT:
+				reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: no login in time");
+				break;
+			default:
+				reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: timeout exceeded");
+				break;
+		}
+		flush();
+	}
+
 	/** The goodbye after too many failed logins; the connection is closed after it. */
 	@Override
 	protected void replyTooManyLoginFailures() throws IOException {
