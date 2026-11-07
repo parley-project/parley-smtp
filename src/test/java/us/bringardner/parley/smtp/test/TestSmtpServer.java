@@ -487,9 +487,14 @@ public class TestSmtpServer {
 				c.cmd("EHLO client.example");
 				String reply = scram(c, ScramMechanism.SHA_256, "carol", "wrong");
 				assertTrue(reply.startsWith("535 5.7.8"), reply);
-				reply = scram(c, ScramMechanism.SHA_256, "reader", "pw");
-				assertTrue(reply.startsWith("535 5.7.8"), "READ only can't send: " + reply);
-				assertTrue(c.cmd("MAIL FROM:<reader@a.test>").startsWith("530"), "not logged in");
+			}
+			try (Client c = new Client(submission.getLocalPort())) {
+				c.cmd("EHLO client.example");
+				// the password is right, so the login stands; sending is refused, saying why
+				String reply = scram(c, ScramMechanism.SHA_256, "reader", "pw");
+				assertTrue(reply.startsWith("235 2.7.0 Authentication successful, but reader doesn't have the write permission"), reply);
+				reply = c.cmd("MAIL FROM:<reader@a.test>");
+				assertTrue(reply.startsWith("550 5.7.1 MAIL refused: reader doesn't have the write permission"), reply);
 			}
 		} finally {
 			submission.setUserRegistry(old);
@@ -534,7 +539,7 @@ public class TestSmtpServer {
 		};
 	}
 
-	/** The send permission can't be checked: 454 4.7.0 (try again later), never 535, and not counted. */
+	/** The send permission can't be checked: MAIL FROM gets 451 4.7.0 (try again later), never 5xx, and nothing is counted. */
 	@Test
 	public void testSendPermissionUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
@@ -543,14 +548,22 @@ public class TestSmtpServer {
 		submission.getLogger().setLevel(Level.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
+			// the login doesn't need the permission; MAIL FROM does, and can't check it now
+			String reply = c.cmd("AUTH PLAIN " + plain("carol", "carolpw"));
+			assertTrue(reply.startsWith("235 2.7.0"), reply);
 			for (int i = 0; i < 5; i++) {
-				String reply = c.cmd("AUTH PLAIN " + plain("carol", "carolpw"));
-				assertTrue(reply.startsWith("454 4.7.0"), reply);
+				reply = c.cmd("MAIL FROM:<carol@a.test>");
+				assertTrue(reply.startsWith("451 4.7.0 The write permission can't be checked now"), reply);
 			}
+		}
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.cmd("EHLO client.example");
 			String reply = scram(c, ScramMechanism.SHA_256, "carol", "carolpw");
-			assertTrue(reply.startsWith("454 4.7.0"), reply);
-			assertTrue(c.cmd("MAIL FROM:<carol@a.test>").startsWith("530"), "not logged in");
-			reply = c.cmd("AUTH PLAIN " + plain("carol", "wrong"));
+			assertTrue(reply.startsWith("235 2.7.0"), reply);
+		}
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.cmd("EHLO client.example");
+			String reply = c.cmd("AUTH PLAIN " + plain("carol", "wrong"));
 			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
 		} finally {
 			submission.setUserRegistry(old);
@@ -620,7 +633,6 @@ public class TestSmtpServer {
 			assertFalse(ehlo.contains("STARTTLS"), ehlo);
 			assertTrue(c.cmd("MAIL FROM:<tony@a.test>").startsWith("530 5.7.0 Authentication required"));
 			assertTrue(c.cmd("AUTH PLAIN " + plain("tony", "wrong")).startsWith("535 5.7.8"));
-			assertTrue(c.cmd("AUTH PLAIN " + plain("reader", "secret")).startsWith("535 5.7.8"), "READ only can't send");
 			// AUTH LOGIN
 			assertEquals("334 VXNlcm5hbWU6", c.cmd("AUTH LOGIN"));
 			assertEquals("334 UGFzc3dvcmQ6", c.cmd(Base64.getEncoder().encodeToString("tony".getBytes())));

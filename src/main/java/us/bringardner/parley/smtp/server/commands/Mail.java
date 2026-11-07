@@ -1,5 +1,7 @@
 package us.bringardner.parley.smtp.server.commands;
 
+import us.bringardner.parley.iam.AuthorizationResult;
+import us.bringardner.parley.smtp.server.SmtpCommand;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Map;
@@ -40,6 +42,20 @@ public class Mail extends BaseCommand {
 		if (s.isSubmission() && !p.isAuthenticated()) {
 			p.error(AUTH_REQUIRED, "5.7.0", "Authentication required");
 			return;
+		}
+		if (p.isAuthenticated()) {
+			// logged in: sending needs the send permission; a missing one is said, and logged
+			AuthorizationResult send = p.checkSend();
+			if (send.getStatus() == AuthorizationResult.Status.UNAVAILABLE) {
+				p.logError("Can't check whether " + p.getPrincipal().getName() + " may send mail: " + send.getReason());
+				p.error(LOCAL_ERROR, "4.7.0", "The " + SmtpCommand.SEND_PERMISSION.getName() + " permission can't be checked now, try again later");
+				return;
+			}
+			if (send.getStatus() != AuthorizationResult.Status.ALLOWED) {
+				p.error(MAILBOX_UNAVAILABLE, "5.7.1", "MAIL refused: "
+						+ p.reportMissingPermission("MAIL", SmtpCommand.SEND_PERMISSION));
+				return;
+			}
 		}
 		if (p.mailRefused()) {
 			return;
