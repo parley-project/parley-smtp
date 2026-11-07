@@ -394,7 +394,8 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		});
 		// keep waiting for the client unless stopped or idle for too long (the server's limit, set from timeout)
 		in.setKeepWaiting(() -> !stopping && running && !isIdleTooLong());
-		out = new BufferedOutputStream(new FilterOutputStream(rawOut) {
+		// the session's output lock is held from the first reply written to the buffer to its flush
+		out = new us.bringardner.parley.net.server.SessionOutputStream(new BufferedOutputStream(new FilterOutputStream(rawOut) {
 			@Override
 			public void write(byte[] b, int off, int len) throws IOException {
 				try {
@@ -412,7 +413,7 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 					throw new ConnectionLostException(e);
 				}
 			}
-		}, 16 * 1024);
+		}, 16 * 1024), getOutputLock());
 	}
 
 	// ------------------------------------------------------------------ replies
@@ -595,23 +596,30 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 	 */
 	@Override
 	public void replyClosing(us.bringardner.parley.net.server.CloseReason reason) throws IOException {
-		if (closing) {
-			return; // already said goodbye
+		// under the output lock, so the check and the 421 are one step: never two goodbyes
+		java.util.concurrent.locks.ReentrantLock lock = getOutputLock();
+		lock.lock();
+		try {
+			if (closing) {
+				return; // already said goodbye
+			}
+			closing = true;
+			String host = getSmtpServer().getHostname();
+			switch (reason) {
+				case SERVER_STOPPING:
+					reply(SERVICE_NOT_AVAILABLE, "4.3.2", host + " Service shutting down");
+					break;
+				case LOGIN_TIME_LIMIT:
+					reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: no login in time");
+					break;
+				default:
+					reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: timeout exceeded");
+					break;
+			}
+			flush();
+		} finally {
+			lock.unlock();
 		}
-		closing = true;
-		String host = getSmtpServer().getHostname();
-		switch (reason) {
-			case SERVER_STOPPING:
-				reply(SERVICE_NOT_AVAILABLE, "4.3.2", host + " Service shutting down");
-				break;
-			case LOGIN_TIME_LIMIT:
-				reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: no login in time");
-				break;
-			default:
-				reply(SERVICE_NOT_AVAILABLE, "4.4.2", host + " Error: timeout exceeded");
-				break;
-		}
-		flush();
 	}
 
 	/** The goodbye after too many failed logins; the connection is closed after it. */
