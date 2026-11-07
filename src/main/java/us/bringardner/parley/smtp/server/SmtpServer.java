@@ -216,8 +216,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				return ret;
 			}
 		});
-		// sessions read the socket themselves and time out on their own
-		setMaxIdleConnection(Long.MAX_VALUE / 2);
 
 		readServerSettings();
 
@@ -265,6 +263,8 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		maxMessageSize = setting("maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 		maxRecipients = setting("maxRecipients", 100);
 		timeout = us.bringardner.parley.core.util.Durations.toIntMillis(durationSetting("timeout", 5 * 60 * 1000));
+		// the session loop closes a session idle for this long (AbstractCommandProcessor.isIdleTooLong)
+		setMaxIdleConnection(timeout);
 		maxHops = setting("maxHops", 100);
 		String networks = setting("relayNetworks");
 		relayNetworks = networks == null ? AddressMatcher.NONE : AddressMatcher.parse(networks);
@@ -918,6 +918,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	/** Close sessions that send nothing for this long (RFC 5321 section 4.5.3.2.7: at least 5 minutes). */
 	public void setTimeout(int timeout) {
 		this.timeout = timeout;
+		setMaxIdleConnection(timeout);
 	}
 
 	/**

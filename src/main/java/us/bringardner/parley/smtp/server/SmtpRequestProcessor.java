@@ -157,6 +157,12 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		}
 	}
 
+	/** The client was last heard from when the reader last received a byte. */
+	@Override
+	protected long getLastActivityTime() {
+		return in == null ? super.getLastActivityTime() : in.getLastReceived();
+	}
+
 	/** Replies are sent when the client has sent nothing more (pipelining, RFC 2920), or the session is closing. */
 	@Override
 	protected void afterRequest() throws IOException {
@@ -386,8 +392,8 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 				}
 			}
 		});
-		in.setKeepWaiting(() -> !stopping && running
-				&& System.currentTimeMillis() - in.getLastReceived() < getSmtpServer().getTimeout());
+		// keep waiting for the client unless stopped or idle for too long (the server's limit, set from timeout)
+		in.setKeepWaiting(() -> !stopping && running && !isIdleTooLong());
 		out = new BufferedOutputStream(new FilterOutputStream(rawOut) {
 			@Override
 			public void write(byte[] b, int off, int len) throws IOException {
