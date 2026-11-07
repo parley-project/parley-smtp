@@ -106,7 +106,7 @@ public class Auth extends BaseCommand {
 		if (status == AuthenticationResult.Status.AUTHENTICATED && p.isAuthenticated()) {
 			// logged in; without the send permission the user is told now, and MAIL FROM is refused
 			String missing = p.checkSend().getStatus() == AuthorizationResult.Status.DENIED
-					? p.permissionMissing("AUTH", SmtpCommand.SEND_PERMISSION, "sending mail") : null;
+					? p.reportMissingPermission("AUTH", SmtpCommand.SEND_PERMISSION) : null;
 			p.reply(AUTH_SUCCEEDED, "2.7.0", missing == null ? "Authentication successful"
 					: "Authentication successful, but " + missing);
 		} else if (status == AuthenticationResult.Status.UNAVAILABLE) {
