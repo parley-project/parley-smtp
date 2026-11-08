@@ -29,7 +29,7 @@ public class Auth extends BaseCommand {
 	private static final long serialVersionUID = 1L;
 
 	/** Every mechanism known; the authenticator limits what is offered. */
-	private static final SaslMechanisms MECHANISMS = SaslMechanisms.standard("smtp");
+	private static final SaslMechanisms MECHANISMS = SaslMechanisms.standard();
 
 	public Auth() {
 		super("AUTH");
