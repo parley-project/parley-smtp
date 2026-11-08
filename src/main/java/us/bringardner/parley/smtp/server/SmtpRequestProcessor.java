@@ -571,6 +571,114 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		return checkPermission(SmtpCommand.SEND_PERMISSION, null);
 	}
 
+	/**
+	 * May the logged-in user send with this sender address (MAIL FROM, or an address in the
+	 * From: header)? Allowed for the user's own address, for an alias that lists the user, and
+	 * for any address when the user holds sendAs on the server as a whole
+	 * ({@link SmtpCommand#SEND_AS_PERMISSION}). A session nobody is logged in to isn't checked
+	 * (mail from outside, or a client in {@code relayNetworks}), nor is the null sender
+	 * ({@code <>}, used for bounces).
+	 * <p>
+	 * The user's own address: a user name that is a full address matches it (a {@code +detail}
+	 * is ignored); a bare user name ({@code tony}) matches that local part at every local domain.
+	 * An alias is one of the aliases file's lines, looked up as local delivery does (the full
+	 * address, then the local part at a local domain; each with and without {@code +detail}); it
+	 * lists the user when one of its members is the user's name, or the user's address at the
+	 * alias's domain. Aliases are not followed into other aliases.
+	 *
+	 * @param address the sender; null for the null sender
+	 * @return ALLOWED, DENIED (the user would need sendAs) or UNAVAILABLE (the registry can't
+	 * answer now)
+	 * @since 2.0.0
+	 */
+	public AuthorizationResult checkSender(MailAddress address) {
+		if (!isAuthenticated()) {
+			return AuthorizationResult.allowed("nobody is logged in: only logins are checked");
+		}
+		if (address == null) {
+			return AuthorizationResult.allowed("the null sender");
+		}
+		String user = getPrincipal().getName().toLowerCase(Locale.ROOT);
+		String local = address.getLocalPart().toLowerCase(Locale.ROOT);
+		String domain = address.getAsciiDomain() == null ? "" : address.getAsciiDomain().toLowerCase(Locale.ROOT);
+		int plus = local.indexOf('+');
+		String base = plus > 0 ? local.substring(0, plus) : local;
+		DeliveryConfig config = getQueue().getConfig();
+		boolean localDomain = !domain.isEmpty() && config.isLocalDomain(domain);
+		if (isUser(user, base, domain, localDomain)) {
+			return AuthorizationResult.allowed(user + " sends as its own address");
+		}
+		Map<String, List<String>> aliases = config.getAliases();
+		List<String> keys = new ArrayList<>(4);
+		keys.add(local + "@" + domain);
+		keys.add(base + "@" + domain);
+		if (localDomain) {
+			keys.add(local);
+			keys.add(base);
+		}
+		for (String key : keys) {
+			List<String> members = aliases.get(key);
+			if (members == null) {
+				continue;
+			}
+			for (String member : members) {
+				String m = member.trim().toLowerCase(Locale.ROOT);
+				int at = m.lastIndexOf('@');
+				boolean listed = at < 0 ? isUser(user, m, domain, localDomain)
+						: isUser(user, m.substring(0, at), m.substring(at + 1), config.isLocalDomain(m.substring(at + 1)));
+				if (listed) {
+					return AuthorizationResult.allowed(user + " is in the alias " + key);
+				}
+			}
+			// the first alias found is the one delivery uses
+			break;
+		}
+		return checkPermission(SmtpCommand.SEND_AS_PERMISSION, null);
+	}
+
+	/** True if the user (a lower-case name) is local@domain: by full address, or a bare name at a local domain */
+	private static boolean isUser(String user, String local, String domain, boolean localDomain) {
+		if (user.indexOf('@') >= 0) {
+			return user.equals(local + "@" + domain);
+		}
+		return localDomain && user.equals(local);
+	}
+
+	/**
+	 * Check the From: header of the logged-in user's message before it is signed and queued:
+	 * every address in every From field must pass {@link #checkSender(MailAddress)}. A message
+	 * with no From field passes (there is nothing to sign it as).
+	 *
+	 * @return null when it may go on; otherwise the result that stops it, with the address
+	 * refused as its reason when it was DENIED
+	 */
+	private AuthorizationResult checkHeaderFrom(Transaction t) throws IOException {
+		if (!isAuthenticated()) {
+			return null;
+		}
+		HeaderFields header;
+		try (InputStream in = new java.io.BufferedInputStream(t.incoming.getInputStream())) {
+			header = HeaderFields.read(in);
+		}
+		for (HeaderFields.Field f : header.getAll("From")) {
+			for (String text : HeaderFields.addresses(f.getValue())) {
+				MailAddress address;
+				try {
+					address = MailAddress.parse(text, true);
+				} catch (IllegalArgumentException e) {
+					address = null;
+				}
+				AuthorizationResult r = address == null ? checkPermission(SmtpCommand.SEND_AS_PERMISSION, null)
+						: checkSender(address);
+				if (r.getStatus() != AuthorizationResult.Status.ALLOWED) {
+					return r.getStatus() == AuthorizationResult.Status.UNAVAILABLE ? r
+							: AuthorizationResult.denied(text);
+				}
+			}
+		}
+		return null;
+	}
+
 	/** Reply to an AUTH the user registry couldn't check: not counted as a failure (RFC 4954 454). */
 	public void authUnavailable() throws IOException {
 		reply(TEMP_AUTH_FAILURE, "4.7.0", "Temporary authentication failure, try again later");
@@ -756,6 +864,19 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 						.append('@').append(getSmtpServer().getHostname()).append(">\r\n");
 			}
 			insertAfterTrace(t, add.toString());
+		}
+		// the logged-in user's From: header, before the message is signed as that domain
+		AuthorizationResult from = checkHeaderFrom(t);
+		if (from != null) {
+			abortTransaction();
+			if (from.getStatus() == AuthorizationResult.Status.UNAVAILABLE) {
+				logError("Can't check whether " + getPrincipal().getName() + " may send as the From: header's address: " + from.getReason());
+				reply(LOCAL_ERROR, "4.7.0", "The " + SmtpCommand.SEND_AS + " permission can't be checked now, try again later");
+			} else {
+				reply(MAILBOX_UNAVAILABLE, "5.7.1", "From: <" + sanitize(from.getReason()) + "> refused: "
+						+ reportMissingPermission("DATA From: <" + sanitize(from.getReason()) + ">", SmtpCommand.SEND_AS_PERMISSION));
+			}
+			return;
 		}
 		boolean quarantine = false;
 		if (mayRelay()) {
