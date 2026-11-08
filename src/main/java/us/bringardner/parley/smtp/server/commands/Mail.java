@@ -143,6 +143,18 @@ public class Mail extends BaseCommand {
 				return;
 			}
 		}
+		// a logged-in user's sender address: their own, an alias that lists them, or sendAs
+		AuthorizationResult sender = p.checkSender(t.from);
+		if (sender.getStatus() == AuthorizationResult.Status.UNAVAILABLE) {
+			p.logError("Can't check whether " + p.getPrincipal().getName() + " may send as " + t.from + ": " + sender.getReason());
+			p.error(LOCAL_ERROR, "4.7.0", "The " + SmtpCommand.SEND_AS + " permission can't be checked now, try again later");
+			return;
+		}
+		if (sender.getStatus() != AuthorizationResult.Status.ALLOWED) {
+			p.error(MAILBOX_NAME_NOT_ALLOWED, "5.7.1", "Sender address <" + t.from + "> refused: "
+					+ p.reportMissingPermission("MAIL FROM:<" + t.from + ">", SmtpCommand.SEND_AS_PERMISSION));
+			return;
+		}
 		t.spf = p.checkSpf(t.from);
 		if (t.spf != null && t.spf.getResult() == SpfResult.Result.FAIL && p.getQueue().getConfig().getSpf().isRejectFail()) {
 			// RFC 7208 section 8.4, RFC 7372

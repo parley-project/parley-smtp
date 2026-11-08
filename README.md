@@ -143,6 +143,16 @@ log in and there are no local users; AUTH with no registry is a configuration er
   permission check. A `454` is never counted as a failed login.
 - **Failed logins are counted by parley-net**, which waits before the `535`; the one failed login too many
   (`maxLoginAttempts`) gets `421 4.7.0 Too many authentication failures` and the connection is closed.
+- **Sender addresses** (RFC 6409 section 6.1): a logged-in user may use their own address and any alias that lists
+  them, both in MAIL FROM and in every address of the From: header. A user name that is a full address
+  (`tony@example.com`) is that address (a `+detail` is ignored); a bare name (`tony`) is that local part at every local
+  domain. An alias lists the user when one of its members is the user's name or address (aliases aren't followed into
+  other aliases). Any other address needs the `sendAs` permission on the server as a whole
+  (`SmtpCommand.SEND_AS_PERMISSION`, for a mailing list or an application that sends for others); the registry is
+  asked only for that, never about an address. A refused MAIL FROM gets `553 5.7.1`, a refused From: header `550 5.7.1`
+  after DATA (checked before the message is DKIM-signed), both naming the missing permission and logged with the
+  address; `451 4.7.0` when the registry can't answer now. A refused sender is not a failed login. Sessions nobody is
+  logged in to (mail from outside, clients in `relayNetworks`) aren't checked, nor is the null sender (`<>`).
 - **Local recipients** are looked up in the same registry (by the full address, then the local part; a group is not a
   recipient). The principal's `maildrop` attribute chooses the directory. A registry that can't answer gets
   `451 4.3.0` (try again later), never "unknown user".
@@ -342,7 +352,6 @@ In `queue.properties` in the queue's directory, without a prefix:
 ### Not included
 
 - **Spam filtering:** DKIM, SPF, DMARC (with reports) and ARC are supported, and a spam scanner can be plugged in (the SMTP server's `spam.*` settings: `none`, `rspamd` or `spamassassin`, found at run time, or your own `SpamProvider` listed in a services file; off by default, with a per-domain override in the queue's `spam.domains`). The scanner itself (rspamd, spamd) is a separate program. DMARC reports only go to `mailto:` addresses.
-- **Envelope sender:** authenticated users may use any address as the sender; it isn't checked against the login.
 - **Optional extensions:** REQUIRETLS, MT-PRIORITY and DELIVERBY aren't implemented.
 
 ### Testing

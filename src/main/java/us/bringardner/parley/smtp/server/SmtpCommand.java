@@ -17,6 +17,23 @@ public interface SmtpCommand extends ICommand {
 	ParleyPermission SEND_PERMISSION = new BasicParleyPermission(StandardPermissions.WRITE, null);
 
 	/**
+	 * The name of {@link #SEND_AS_PERMISSION}
+	 *
+	 * @since 2.0.0
+	 */
+	String SEND_AS = "sendAs";
+
+	/**
+	 * sendAs on the server as a whole: what a logged-in user needs to send with a sender address
+	 * that isn't theirs (neither their own address nor an alias that lists them), in MAIL FROM
+	 * or in the From: header. The registry is asked only for this permission on the server as a
+	 * whole, never about an address, so every registry works as it is.
+	 *
+	 * @since 2.0.0
+	 */
+	ParleyPermission SEND_AS_PERMISSION = new BasicParleyPermission(SEND_AS, null);
+
+	/**
 	 * Run the command.
 	 *
 	 * @param args the rest of the command line after the verb and one space ("" if none)

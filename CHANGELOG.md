@@ -2,6 +2,17 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Added (2026-11-08: the sender check, To-Do 16.8)
+
+- **A logged-in user's sender addresses are checked** (MAIL FROM and every address in the From: header): their own
+  address and aliases that list them are allowed; any other address needs the new `sendAs` permission on the server
+  as a whole (`SmtpCommand.SEND_AS`, `SEND_AS_PERMISSION`). Refused: `553 5.7.1` at MAIL FROM, `550 5.7.1` after DATA
+  (before DKIM signing); `451 4.7.0` when the registry can't answer. Before this, a logged-in user could send as any
+  address, and mail for a hosted domain was signed with that domain's DKIM key. Sessions with no login
+  (`relayNetworks`, mail from outside) are unchanged.
+- **`SmtpRequestProcessor.checkSender(MailAddress)`** and **`HeaderFields.addresses(String)`** (every address of an
+  address field, groups included).
+
 ### Changed (2026-11-06: users, logins and permissions come from parley-iam)
 
 - **parley-smtp uses parley-iam and the new parley-net**: the server's user registry (a parley-iam `UserRegistry`,

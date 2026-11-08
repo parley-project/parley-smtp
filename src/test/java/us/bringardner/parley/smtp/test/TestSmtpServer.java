@@ -58,6 +58,7 @@ import us.bringardner.parley.net.server.IServer;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.queue.DeliveryException;
 import us.bringardner.parley.smtp.queue.MxResolver;
+import us.bringardner.parley.smtp.server.SmtpCommand;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 import us.bringardner.parley.smtp.server.SmtpServer;
 
@@ -554,6 +555,132 @@ public class TestSmtpServer {
 			c.cmd("EHLO client.example");
 			String reply = c.cmd("AUTH PLAIN " + plain("carol", "wrong"));
 			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
+		} finally {
+			submission.setUserRegistry(old);
+			submission.getLogger().setLevel(level);
+		}
+	}
+
+	/**
+	 * scramAcl's users, with sendAs answered here: carol holds it on the server as a whole; for
+	 * reader (who can't send at all) and everyone else, the registry's own answer. With
+	 * {@code down}, every sendAs check is UNAVAILABLE instead.
+	 */
+	private static UserRegistry sendAsAcl(boolean down) {
+		return new ForwardingUserRegistry(scramAcl()) {
+			@Override
+			public AuthorizationResult checkPermission(Requester requester, ParleyPermission needed,
+					ProtectedResource resource) {
+				if (needed.getName().equals(SmtpCommand.SEND_AS)) {
+					assertNull(resource, "sendAs is asked about the server as a whole, never an address");
+					assertNull(needed.getResourceId(), "sendAs is asked about the server as a whole");
+					if (down) {
+						return AuthorizationResult.unavailable("the database is down");
+					}
+					if (requester.getPrincipal() != null && requester.getPrincipal().getName().equals("carol")) {
+						return AuthorizationResult.allowed("carol holds sendAs");
+					}
+				}
+				return super.checkPermission(requester, needed, resource);
+			}
+		};
+	}
+
+	/** MAIL FROM: a logged-in user's own address and aliases that list them pass; any other needs sendAs (553 5.7.1). */
+	@Test
+	public void testSenderAddress() throws Exception {
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("AUTH PLAIN " + plain("tony", "secret"), "235");
+			for (String own : new String[] {"tony@a.test", "TONY@A.TEST", "tony+lists@a.test", ""}) {
+				c.ok("MAIL FROM:<" + own + ">", "250");
+				c.ok("RSET", "250");
+			}
+			// sales: tony, team1@b.test
+			c.ok("MAIL FROM:<sales@a.test>", "250");
+			c.ok("RSET", "250");
+			for (String other : new String[] {"boss@ext.test", "joe@a.test", "tony@b.test", "team1@b.test"}) {
+				String reply = c.cmd("MAIL FROM:<" + other + ">");
+				assertTrue(reply.startsWith("553 5.7.1 Sender address <" + other + "> refused: tony doesn't have the sendAs permission"),
+						other + " -> " + reply);
+			}
+			// a refused sender is not a failed login: the session stays logged in
+			c.ok("MAIL FROM:<tony@a.test>", "250");
+		}
+		// team1 is in the alias as team1@b.test, and b.test isn't one of A's domains: not team1@a.test
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("AUTH PLAIN " + plain("team1", "secret"), "235");
+			assertTrue(c.cmd("MAIL FROM:<sales@a.test>").startsWith("553 5.7.1"));
+			c.ok("MAIL FROM:<team1@a.test>", "250");
+		}
+		// nobody logged in (mail from outside) isn't checked
+		try (Client c = new Client(a.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("MAIL FROM:<tony@a.test>", "250");
+		}
+	}
+
+	/** The From: header of a logged-in user's message is checked before it is signed and queued (550 5.7.1). */
+	@Test
+	public void testSenderHeader() throws Exception {
+		reset(rootA, "tony");
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("AUTH PLAIN " + plain("tony", "secret"), "235");
+			String reply = c.sendMail("tony@a.test", "tony@a.test", "From: The Boss <boss@ext.test>\r\nSubject: forged\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("550 5.7.1 From: <boss@ext.test> refused: tony doesn't have the sendAs permission"), reply);
+			// every address in every From field
+			reply = c.sendMail("tony@a.test", "tony@a.test",
+					"From: Tony <tony@a.test>, boss@ext.test\r\nSubject: two\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("550 5.7.1 From: <boss@ext.test>"), reply);
+			reply = c.sendMail("tony@a.test", "tony@a.test",
+					"From: tony@a.test\r\nFrom: boss@ext.test\r\nSubject: two fields\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("550 5.7.1 From: <boss@ext.test>"), reply);
+			// own address, an alias, a group, comments and quoted names pass
+			reply = c.sendMail("tony@a.test", "tony@a.test",
+					"From: \"Tony, at home\" <tony@a.test> (me), Sales: sales@a.test;\r\nSubject: allowed\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("250 2.0.0"), reply);
+		}
+		waitFor(() -> count(rootA, "tony") == 1, 30000, "the allowed message only");
+		assertNotNull(find(inbox(rootA, "tony"), "Subject: allowed"));
+	}
+
+	/** A user holding sendAs may send as any address, in MAIL FROM and the From: header. */
+	@Test
+	public void testSendAsPermission() throws Exception {
+		reset(rootA, "tony");
+		UserRegistry old = submission.getUserRegistry();
+		submission.setUserRegistry(sendAsAcl(false));
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("AUTH PLAIN " + plain("carol", "carolpw"), "235");
+			String reply = c.sendMail("newsletter@ext.test", "tony@a.test",
+					"From: Newsletter <newsletter@ext.test>\r\nSubject: on behalf\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("250 2.0.0"), reply);
+		} finally {
+			submission.setUserRegistry(old);
+		}
+		waitFor(() -> count(rootA, "tony") == 1, 30000, "the message sent as another address");
+	}
+
+	/** sendAs can't be checked: 451 4.7.0 (try again later), never a refusal. */
+	@Test
+	public void testSendAsUnavailable() throws Exception {
+		UserRegistry old = submission.getUserRegistry();
+		submission.setUserRegistry(sendAsAcl(true));
+		ILogger.Level level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(Level.NONE);
+		try (Client c = new Client(submission.getLocalPort())) {
+			c.ok("EHLO client.example", "250");
+			c.ok("AUTH PLAIN " + plain("carol", "carolpw"), "235");
+			// carol's own address doesn't need the registry
+			c.ok("MAIL FROM:<carol@a.test>", "250");
+			c.ok("RSET", "250");
+			String reply = c.cmd("MAIL FROM:<other@ext.test>");
+			assertTrue(reply.startsWith("451 4.7.0 The sendAs permission can't be checked now"), reply);
+			reply = c.sendMail("carol@a.test", "tony@a.test", "From: other@ext.test\r\nSubject: x\r\n\r\nhi\r\n");
+			assertTrue(reply.startsWith("451 4.7.0 The sendAs permission can't be checked now"), reply);
 		} finally {
 			submission.setUserRegistry(old);
 			submission.getLogger().setLevel(level);

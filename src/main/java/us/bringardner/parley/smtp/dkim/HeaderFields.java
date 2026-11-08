@@ -214,6 +214,68 @@ public final class HeaderFields {
 		}
 	}
 
+	/**
+	 * Every address in an address field such as From (RFC 5322 section 3.4: a list of mailboxes,
+	 * each {@code a@b} or {@code Name <a@b>}, and groups {@code name: a@b, c@d;}), as written
+	 * between the angle brackets or in place of them, comments removed. An entry with no
+	 * {@code @} is returned as it is, so a caller can refuse what it can't read.
+	 *
+	 * @param value the field's value (unfolded)
+	 * @return the addresses in order; empty for null or a field with none
+	 * @since 2.0.0
+	 */
+	public static List<String> addresses(String value) {
+		List<String> ret = new ArrayList<>();
+		if (value == null) {
+			return ret;
+		}
+		String v = stripComments(value);
+		// split at commas and semicolons outside quotes and angle brackets
+		List<String> parts = new ArrayList<>();
+		StringBuilder part = new StringBuilder();
+		boolean quoted = false;
+		boolean angle = false;
+		for (int i = 0; i < v.length(); i++) {
+			char c = v.charAt(i);
+			if (quoted && c == '\\' && i + 1 < v.length()) {
+				part.append(c).append(v.charAt(++i));
+				continue;
+			}
+			if (c == '"' && !angle) {
+				quoted = !quoted;
+			} else if (!quoted && c == '<') {
+				angle = true;
+			} else if (!quoted && c == '>') {
+				angle = false;
+			} else if (!quoted && !angle && (c == ',' || c == ';')) {
+				parts.add(part.toString());
+				part.setLength(0);
+				continue;
+			}
+			part.append(c);
+		}
+		parts.add(part.toString());
+		for (String p : parts) {
+			String a;
+			int lt = indexOutsideQuotes(p, '<');
+			if (lt >= 0) {
+				int gt = p.indexOf('>', lt);
+				a = gt > lt ? p.substring(lt + 1, gt) : p.substring(lt + 1);
+			} else {
+				a = p;
+				int colon = indexOutsideQuotes(a, ':'); // a group's display name: "name: a@b"
+				if (colon >= 0) {
+					a = a.substring(colon + 1);
+				}
+			}
+			a = a.trim();
+			if (!a.isEmpty()) {
+				ret.add(a);
+			}
+		}
+		return ret;
+	}
+
 	private static int indexOutsideQuotes(String s, char ch) {
 		boolean quoted = false;
 		for (int i = 0; i < s.length(); i++) {
