@@ -137,10 +137,12 @@ log in and there are no local users; AUTH with no registry is a configuration er
 - **AUTH** (RFC 4954) offers PLAIN and LOGIN when the registry checks passwords, and SCRAM-SHA-256 and SCRAM-SHA-1
   when it keeps SCRAM credentials for every user. Names and passwords are prepared with SASLprep (parley-mail).
 - **Sending needs the `write` permission** on the server as a whole (`SmtpCommand.SEND_PERMISSION`); the registry
-  decides who holds it. A user without it is refused like a wrong password.
-- **Replies:** `235 2.7.0` when logged in; `535 5.7.8` for bad credentials or a user who may not send; `454 4.7.0`
-  (temporary authentication failure, try again later) when the registry can't answer now, for the login or the
-  permission check. A `454` is never counted as a failed login.
+  decides who holds it. It isn't part of logging in: a user with the right password is logged in either way, and a
+  user without it is told so in the `235` (`Authentication successful, but tony doesn't have the write permission`).
+  MAIL FROM is then refused with `550 5.7.1`, naming the missing permission; it isn't counted as a failed login.
+- **Replies:** `235 2.7.0` when logged in; `535 5.7.8` for bad credentials; `454 4.7.0` (temporary authentication
+  failure, try again later) when the registry can't answer the login now. When it can't answer the permission check,
+  MAIL FROM gets `451 4.7.0` (try again later). Neither is counted as a failed login.
 - **Failed logins are counted by parley-net**, which waits before the `535`; the one failed login too many
   (`maxLoginAttempts`) gets `421 4.7.0 Too many authentication failures` and the connection is closed.
 - **Sender addresses** (RFC 6409 section 6.1): a logged-in user may use their own address and any alias that lists
