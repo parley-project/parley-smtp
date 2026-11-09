@@ -80,7 +80,7 @@ public class TestSmtpServer {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		ServerTestSupport.writeKeystore(new File(KEYSTORE));
+		ServerTestSupport.writeKeystore(FileSource.of(new File(KEYSTORE)));
 		// The submission server reads its settings with its own prefix
 		for (String prefix : new String[] {SmtpServer.SMTP_PREFIX, SmtpServer.SUBMISSION_PREFIX}) {
 			System.setProperty(prefix + ".keyStoreName", KEYSTORE);
