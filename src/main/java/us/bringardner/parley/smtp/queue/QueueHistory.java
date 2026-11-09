@@ -8,6 +8,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 
+import us.bringardner.parley.core.BaseObject;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 
@@ -27,7 +28,7 @@ import us.bringardner.parley.files.FileSourceFactory;
  *
  * @since 2.0.0
  */
-public final class QueueHistory implements QueueListener {
+public final class QueueHistory extends BaseObject implements QueueListener {
 
 	/** Queue setting ({@link MailQueue#SETTINGS_FILE}): writes the history (default true) */
 	public static final String HISTORY_PROP = "history";
@@ -46,7 +47,6 @@ public final class QueueHistory implements QueueListener {
 	public static final String PREFIX = "smtp-";
 	public static final String SUFFIX = ".jsonl";
 
-	private static final System.Logger LOG = System.getLogger(QueueHistory.class.getName());
 
 	private final FileSource dir;
 	private final int keepDays;
@@ -132,7 +132,7 @@ public final class QueueHistory implements QueueListener {
 		try {
 			append(event.getTime(), toJson(event));
 		} catch (IOException | RuntimeException e) {
-			LOG.log(System.Logger.Level.WARNING, "Can't record " + event + " in the queue history " + dir.getAbsolutePath(), e);
+			logWarn("Can't record " + event + " in the queue history " + dir.getAbsolutePath(), e);
 		}
 	}
 
@@ -165,12 +165,12 @@ public final class QueueHistory implements QueueListener {
 					if (f.delete()) {
 						n++;
 					} else {
-						LOG.log(System.Logger.Level.WARNING, "Can't delete the old queue history " + f.getAbsolutePath());
+						logWarn("Can't delete the old queue history " + f.getAbsolutePath());
 					}
 				}
 			}
 		} catch (IOException e) {
-			LOG.log(System.Logger.Level.WARNING, "Can't list the queue history " + dir.getAbsolutePath(), e);
+			logWarn("Can't list the queue history " + dir.getAbsolutePath(), e);
 		}
 		return n;
 	}
