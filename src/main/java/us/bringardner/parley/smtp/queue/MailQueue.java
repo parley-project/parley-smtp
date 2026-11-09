@@ -5,7 +5,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.System.Logger.Level;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -24,6 +23,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import us.bringardner.parley.core.BaseObject;
+import us.bringardner.parley.core.NamedThreadFactory;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.mail.store.MailLocks;
 import us.bringardner.parley.mail.store.MailboxRegistry;
@@ -37,7 +38,6 @@ import us.bringardner.parley.smtp.dkim.ArcSealer;
 import us.bringardner.parley.smtp.dkim.Dkim;
 import us.bringardner.parley.smtp.dkim.DkimSigner;
 import us.bringardner.parley.smtp.dkim.HeaderFields;
-import us.bringardner.parley.core.NamedThreadFactory;
 
 /**
  * The persistent mail queue of the SMTP server. A message accepted by the server
@@ -56,7 +56,7 @@ import us.bringardner.parley.core.NamedThreadFactory;
  * removes leftover temporary files when they are old enough that no server can still be
  * writing them.
  */
-public class MailQueue {
+public class MailQueue extends BaseObject {
 
 	/**
 	 * The queue's own settings, in its directory: how its mail is delivered (hostname, domains,
@@ -102,7 +102,6 @@ public class MailQueue {
 		}
 	}
 
-	private static final System.Logger LOG = System.getLogger(MailQueue.class.getName());
 	private static final SecureRandom RANDOM = new SecureRandom();
 	private static final AtomicLong SEQUENCE = new AtomicLong();
 	/** Alias expansion deeper than this is a loop. */
@@ -243,7 +242,7 @@ public class MailQueue {
 		// (leases renewed) until it ends, or another server could take the entry over meanwhile
 		LockDomain d = domain;
 		domain = null;
-		LOG.log(Level.WARNING, "Queue workers are still delivering; the queue's locks are kept until they finish");
+		logWarn("Queue workers are still delivering; the queue's locks are kept until they finish");
 		Thread t = new Thread(() -> {
 			try {
 				while (!w.awaitTermination(1, TimeUnit.MINUTES)) {
@@ -324,7 +323,7 @@ public class MailQueue {
 					// delivered and removed by another server since the listing
 				} catch (IOException e) {
 					if (damaged.add(name)) {
-						LOG.log(Level.WARNING, "Skipping damaged queue file " + name, e);
+						logWarn("Skipping damaged queue file " + name, e);
 					}
 				}
 			}
@@ -506,7 +505,7 @@ public class MailQueue {
 			try {
 				l.queueEvent(event);
 			} catch (RuntimeException ex) {
-				LOG.log(Level.WARNING, "A queue listener failed on " + event, ex);
+				logWarn("A queue listener failed on " + event, ex);
 			}
 		}
 	}
@@ -527,7 +526,7 @@ public class MailQueue {
 				try {
 					syncWithDirectory(false);
 				} catch (IOException | RuntimeException ex) {
-					LOG.log(Level.DEBUG, "Can't look at the queue directory", ex);
+					logDebug("Can't look at the queue directory", ex);
 				}
 			}
 			for (QueueEntry e : entries.values()) {
@@ -537,7 +536,7 @@ public class MailQueue {
 							try {
 								process(e);
 							} catch (Throwable t) {
-								LOG.log(Level.ERROR, "Error delivering " + e.id, t);
+								logError("Error delivering " + e.id, t);
 							} finally {
 								active.remove(e.id);
 							}
@@ -644,7 +643,7 @@ public class MailQueue {
 			HeaderRewriter.prepend(incoming, incoming(id + "k"), field);
 			return true;
 		} catch (IOException | GeneralSecurityException | RuntimeException ex) {
-			LOG.log(Level.WARNING, "Can't DKIM-sign " + id + "; it is sent unsigned", ex);
+			logWarn("Can't DKIM-sign " + id + "; it is sent unsigned", ex);
 			return false;
 		}
 	}
@@ -677,7 +676,7 @@ public class MailQueue {
 				e.write(envelope(e.id), entryLock);
 			}
 		} catch (IOException | GeneralSecurityException | RuntimeException ex) {
-			LOG.log(Level.WARNING, "Can't ARC-seal " + e.id + "; it is forwarded unsealed", ex);
+			logWarn("Can't ARC-seal " + e.id + "; it is forwarded unsealed", ex);
 		}
 	}
 
@@ -869,7 +868,7 @@ public class MailQueue {
 				notify(e, content, DsnBuilder.Kind.DELAY, delayed, null);
 				notify(e, content, DsnBuilder.Kind.SUCCESS, succeeded, successActions);
 			} else if (!failed.isEmpty()) {
-				LOG.log(Level.WARNING, "A bounce couldn't be delivered and is discarded: " + e);
+				logWarn("A bounce couldn't be delivered and is discarded: " + e);
 			}
 			if (!listeners.isEmpty()) {
 				for (QueuedRecipient r : attempted) {
@@ -943,7 +942,7 @@ public class MailQueue {
 				try {
 					a = m.indexOf('@') > 0 ? MailAddress.parse(m, true) : new MailAddress(m, r.address.getDomain());
 				} catch (IllegalArgumentException ex) {
-					LOG.log(Level.WARNING, "Invalid alias member " + m);
+					logWarn("Invalid alias member " + m);
 					continue;
 				}
 				QueuedRecipient q = new QueuedRecipient(a, r.orcpt != null ? r.orcpt : "rfc822;" + r.address,
@@ -999,7 +998,7 @@ public class MailQueue {
 			d.recipients.add(new QueuedRecipient(e.from, null, EnumSet.of(QueuedRecipient.Notify.NEVER)));
 			commit(d, in);
 		} catch (IOException ex) {
-			LOG.log(Level.ERROR, "Can't create a delivery status notification for " + e.id, ex);
+			logError("Can't create a delivery status notification for " + e.id, ex);
 		}
 	}
 }

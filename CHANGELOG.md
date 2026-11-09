@@ -2,6 +2,11 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-08: logging through ILogger, To-Do 19.1 and 19.2)
+
+- **Logging goes through parley-core's ILogger**: `MailQueue` and `QueueHistory` are `BaseObject`s now and
+  no longer log through System.Logger. The pom declares parley-core directly, since the module uses it.
+
 ### Added (2026-11-08: the sender check, To-Do 16.8)
 
 - **A logged-in user's sender addresses are checked** (MAIL FROM and every address in the From: header): their own
