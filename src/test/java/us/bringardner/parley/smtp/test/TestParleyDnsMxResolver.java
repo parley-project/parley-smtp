@@ -1,5 +1,6 @@
 package us.bringardner.parley.smtp.test;
 
+import us.bringardner.parley.core.LogLevel;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -290,7 +291,7 @@ public class TestParleyDnsMxResolver {
 			b.setHostname("mx." + domain);
 			b.getDeliveryConfig().getLocalDomains().clear();
 			b.addLocalDomain(domain);
-			b.getLogger().setLevel(us.bringardner.parley.core.ILogger.Level.ERROR);
+			b.setLogLevel(us.bringardner.parley.core.LogLevel.ERROR);
 			b.getSpf().setDns(resolver()::records); // SPF from the test DNS server, not the real one
 			b.getDmarc().setDns(resolver()::txt);
 			b.startAndWait(10000);
@@ -305,7 +306,7 @@ public class TestParleyDnsMxResolver {
 			a.getDeliveryConfig().setResolver(resolver);
 			a.getDeliveryConfig().setRemotePort(b.getLocalPort());
 			a.getDeliveryConfig().setConnectTimeout(1000);
-			a.getLogger().setLevel(us.bringardner.parley.core.ILogger.Level.ERROR);
+			a.setLogLevel(us.bringardner.parley.core.LogLevel.ERROR);
 			a.startAndWait(10000);
 
 			try (TestSmtpServer.Client c = new TestSmtpServer.Client(a.getLocalPort())) {
