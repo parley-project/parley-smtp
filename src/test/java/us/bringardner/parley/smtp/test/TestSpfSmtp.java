@@ -15,7 +15,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.net.server.FileUserRegistry;
@@ -39,7 +39,7 @@ public class TestSpfSmtp {
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");
-		b.getLogger().setLevel(Level.ERROR);
+		b.setLogLevel(LogLevel.ERROR);
 
 		Map<String, Object> zone = new HashMap<>();
 		zone.put("pass.test", records("SPF", "v=spf1 ip4:127.0.0.0/8 ip6:::1 -all"));

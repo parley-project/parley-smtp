@@ -35,8 +35,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ILogger.Level;
-import us.bringardner.parley.core.ILogger;
+import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.iam.AuthorizationResult;
@@ -127,7 +126,7 @@ public class TestSmtpServer {
 		submission.setHostname("mx.a.test");
 		submission.setLoginFailureDelay(0);
 		submission.setQueue(a.getQueue());
-		submission.getLogger().setLevel(Level.ERROR);
+		submission.setLogLevel(LogLevel.ERROR);
 		submission.startAndWait(10000);
 	}
 
@@ -139,7 +138,7 @@ public class TestSmtpServer {
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
 		s.setLoginFailureDelay(0);
-		s.getLogger().setLevel(Level.ERROR);
+		s.setLogLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new java.util.HashMap<>())); // SPF without real DNS: every domain has none
 		s.getDmarc().setDns(TestDkim.keys(new java.util.HashMap<>())::txt); // nor DMARC: no policy records
 		return s;
@@ -534,8 +533,8 @@ public class TestSmtpServer {
 	public void testSendPermissionUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(permissionsDown());
-		us.bringardner.parley.core.ILogger.Level level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(Level.NONE);
+		us.bringardner.parley.core.LogLevel level = submission.getLogLevel();
+		submission.setLogLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			// the login doesn't need the permission; MAIL FROM does, and can't check it now
@@ -557,7 +556,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
+			submission.setLogLevel(level);
 		}
 	}
 
@@ -669,8 +668,8 @@ public class TestSmtpServer {
 	public void testSendAsUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(sendAsAcl(true));
-		ILogger.Level level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(Level.NONE);
+		LogLevel level = submission.getLogLevel();
+		submission.setLogLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.ok("EHLO client.example", "250");
 			c.ok("AUTH PLAIN " + plain("carol", "carolpw"), "235");
@@ -683,7 +682,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("451 4.7.0 The sendAs permission can't be checked now"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
+			submission.setLogLevel(level);
 		}
 	}
 
@@ -691,8 +690,8 @@ public class TestSmtpServer {
 	public void testAccessControlUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(downAcl());
-		us.bringardner.parley.core.ILogger.Level level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(Level.NONE);
+		us.bringardner.parley.core.LogLevel level = submission.getLogLevel();
+		submission.setLogLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			for (int i = 0; i < 6; i++) {
@@ -703,7 +702,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("454 4.7.0"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
+			submission.setLogLevel(level);
 		}
 		// a local recipient that can't be looked up is tried again later, not refused as unknown,
 		// and the cause is logged, since the reply doesn't give it
@@ -711,11 +710,7 @@ public class TestSmtpServer {
 		a.getQueue().getConfig().setUserRegistry(downAcl());
 		IProcessorFactory factory = a.getProcessorFactory();
 		RecordingLogger log = new RecordingLogger();
-		a.setProcessorFactory(() -> {
-			SmtpRequestProcessor ret = new SmtpRequestProcessor();
-			ret.setLogger(log);
-			return ret;
-		});
+		a.setProcessorFactory(() -> new RecordingProcessor(log));
 		try (Client c = new Client(a.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			c.ok("MAIL FROM:<x@elsewhere.test>", "250");
@@ -1077,25 +1072,34 @@ public class TestSmtpServer {
 	}
 
 	/** Keeps the errors a session logs, so a test can check them. */
-	private static class RecordingLogger implements ILogger {
+	private static class RecordingLogger {
 		final List<String> errors = java.util.Collections.synchronizedList(new ArrayList<>());
 		final List<Throwable> causes = java.util.Collections.synchronizedList(new ArrayList<>());
-		private Level level = Level.ERROR;
+	}
 
-		@Override public void init(String name) {}
-		@Override public void setLevel(Level level) { this.level = level; }
-		@Override public Level getLevel() { return level; }
-		@Override public void info(String msg) {}
-		@Override public void info(String msg, Throwable error) {}
-		@Override public boolean isInfoEnabled() { return false; }
-		@Override public void error(String msg) { error(msg, null); }
-		@Override public void error(String msg, Throwable error) { errors.add(msg); causes.add(error); }
-		@Override public boolean isErrorEnabled() { return true; }
-		@Override public void debug(String msg) {}
-		@Override public void debug(String msg, Throwable error) {}
-		@Override public boolean isDebugEnabled() { return false; }
-		@Override public void warn(String msg) {}
-		@Override public void warn(String msg, Throwable error) {}
-		@Override public boolean isWarnEnabled() { return false; }
+	/** A session that gives the errors it logs to a RecordingLogger (and logs nothing else). */
+	private static class RecordingProcessor extends SmtpRequestProcessor {
+		private final RecordingLogger log;
+
+		RecordingProcessor(RecordingLogger log) {
+			this.log = log;
+			setLogLevel(LogLevel.NONE);
+		}
+
+		@Override
+		public void logError(String msg) {
+			logError(msg, (Throwable) null);
+		}
+
+		@Override
+		public void logError(java.util.function.Supplier<String> msg) {
+			logError(msg.get(), (Throwable) null);
+		}
+
+		@Override
+		public void logError(String msg, Throwable error) {
+			log.errors.add(msg);
+			log.causes.add(error);
+		}
 	}
 }

@@ -133,7 +133,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		super(port, name, prefixOf(secure, submission), secure);
 		this.submission = submission;
 		initMe();
-		finishInit();
 	}
 
 	/** The prefix of a server's settings */
@@ -212,7 +211,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			@Override
 			public IProcessor getProcessor() {
 				SmtpRequestProcessor ret = new SmtpRequestProcessor();
-				ret.getLogger().setLevel(SmtpServer.this.getLogger().getLevel());
+				ret.setLogLevel(SmtpServer.this.getLogLevel());
 				return ret;
 			}
 		});

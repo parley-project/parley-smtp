@@ -79,7 +79,7 @@
 	</distributionManagement>
 
 	<dependencies>
-		<!-- Used directly: BaseObject and ILogger (logging, settings) -->
+		<!-- Used directly: BaseObject and LogLevel (logging, settings) -->
 		<dependency>
 			<groupId>us.bringardner.parley</groupId>
 			<artifactId>parley-core</artifactId>
