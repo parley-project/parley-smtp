@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.iam.AuthenticationResult;
 import us.bringardner.parley.iam.AuthorizationResult;
 import us.bringardner.parley.files.FileSource;
@@ -1253,8 +1252,4 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		}
 	}
 
-	@Override
-	protected ILogger getLogger(String name) {
-		return super.getLogger("SmtpRequestProcessor");
-	}
 }

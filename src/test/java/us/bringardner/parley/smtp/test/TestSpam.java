@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 
 import com.sun.net.httpserver.HttpServer;
 
-import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.ConnectionSetting;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
@@ -633,7 +633,7 @@ public class TestSpam {
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");
-		b.getLogger().setLevel(Level.ERROR);
+		b.setLogLevel(LogLevel.ERROR);
 		b.startAndWait(10000);
 	}
 

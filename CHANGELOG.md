@@ -2,6 +2,12 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-10: logging through System.Logger, To-Do 19.5)
+
+- **Logging through `System.Logger`** (parley-core): `SmtpRequestProcessor` logs under its class
+  name (no longer `SmtpRequestProcessor`); levels are set per object with `setLogLevel`. `SmtpServer` no longer calls
+  `finishInit()` (removed from parley-mail), so it no longer sets INFO on itself.
+
 ### Changed (2026-11-08: logging through ILogger, To-Do 19.1 and 19.2)
 
 - **Logging goes through parley-core's ILogger**: `MailQueue` and `QueueHistory` are `BaseObject`s now and

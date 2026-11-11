@@ -7,7 +7,7 @@ import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.net.server.FileUserRegistry;
@@ -27,7 +27,7 @@ public class TestCloseReplies {
 			s.setMaildropRoot(root);
 			MailStoreSetup.setUp(root, "mx.c.test", "c.test");
 			s.setHostname("mx.c.test");
-			s.getLogger().setLevel(Level.ERROR);
+			s.setLogLevel(LogLevel.ERROR);
 			s.startAndWait(10000);
 			try (TestSmtpServer.Client c = new TestSmtpServer.Client(s.getLocalPort())) {
 				assertTrue(c.greeting.startsWith("220 "), c.greeting);
