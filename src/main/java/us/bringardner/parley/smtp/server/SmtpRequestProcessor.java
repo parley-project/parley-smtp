@@ -928,7 +928,8 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 		e.setSmtpUtf8(t.smtpUtf8);
 		e.setRet(t.ret);
 		e.setEnvid(t.envid);
-		e.setSize(t.incoming.length());
+		long size = t.incoming.length();
+		e.setSize(size);
 		e.setSubmitter(isAuthenticated() ? getPrincipal().getName() : null);
 		for (QueuedRecipient r : t.recipients) {
 			e.addRecipient(r);
@@ -942,7 +943,33 @@ public class SmtpRequestProcessor extends AbstractMailProcessor implements SMTP 
 			incoming.delete();
 			throw ex;
 		}
+		// The link between this session and the message's later life in the queue: the queue's
+		// own lines start with the queue ID
+		logInfo(queuedLine(t, size));
 		reply(OK, "2.0.0", "Ok: queued as " + t.id);
+	}
+
+	/** "Queued MWC3C9SW14D56 from <a@x.test> to <b@y.test>, <c@y.test> (1234 bytes)"; at most 10 recipients are named. */
+	private static String queuedLine(Transaction t, long size) {
+		StringBuilder ret = new StringBuilder("Queued ").append(t.id).append(" from <").append(t.from == null ? "" : t.from.toString()).append("> to ");
+		int n = 0;
+		for (QueuedRecipient r : t.recipients) {
+			if (n == 10) {
+				ret.append(" and ").append(t.recipients.size() - n).append(" more");
+				break;
+			}
+			ret.append(n == 0 ? "<" : ", <").append(r.getAddress()).append('>');
+			n++;
+		}
+		ret.append(" (").append(size).append(" bytes)");
+		// what a client sent is logged without control characters, so it can't start a log line of its own
+		for (int i = 0; i < ret.length(); i++) {
+			char c = ret.charAt(i);
+			if (c < 0x20 || c == 0x7f) {
+				ret.setCharAt(i, '?');
+			}
+		}
+		return ret.toString();
 	}
 
 	/**
