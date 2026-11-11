@@ -191,6 +191,13 @@ log in and there are no local users; AUTH with no registry is a configuration er
   - For UTF-8 addresses or messages they use `message/global-delivery-status` and `message/global`.
   - A notification is never sent about a notification.
 
+**Following a message in the log.** Every session has an ID in front of its log lines (parley-net).
+When a session takes a message in, it logs the message's queue ID at INFO:
+`[SmtpServer-812] Queued MWC3C9SW14D56 from <a@x.test> to <b@y.test> (1234 bytes)`. The queue
+delivers the message later, on its own threads, and everything logged then starts with the queue ID,
+`[MWC3C9SW14D56]`. So searching a log for the queue ID shows the delivery, and its `Queued` line
+names the session the message came in on.
+
 ### DKIM (RFC 6376)
 
 The server signs outgoing mail and verifies the signatures of incoming mail. The code is in `us.bringardner.parley.smtp.dkim`, and all DNS lookups go through parley-dns.

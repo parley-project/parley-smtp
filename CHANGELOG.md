@@ -2,6 +2,15 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-11: session IDs in the log, To-Do 19.7)
+
+- **A message can be followed through the log.** The session that takes a message in logs, at INFO,
+  `[SmtpServer-812] Queued MWC3C9SW14D56 from <a@x.test> to <b@y.test> (1234 bytes)` (at most 10
+  recipients are named). The queue then delivers the message with its queue ID as the log ID, so
+  everything logged during delivery starts with `[MWC3C9SW14D56]`, whichever object logs it.
+- **QUIT says so in the log**: the server's disconnect line for a session the client ended reads
+  `Disconnected (client quit) after ...`.
+
 ### Changed (2026-11-10: logging through System.Logger, To-Do 19.5)
 
 - **Logging through `System.Logger`** (parley-core): `SmtpRequestProcessor` logs under its class
