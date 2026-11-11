@@ -16,6 +16,8 @@ public class Quit extends BaseCommand {
 	@Override
 	public void execute(SmtpRequestProcessor p, String args) throws IOException {
 		p.abortTransaction();
+		// for the server's "Disconnected" line
+		p.setCloseReason(us.bringardner.parley.net.server.SessionLog.REASON_CLIENT_QUIT);
 		p.reply(SERVICE_CLOSING, "2.0.0", "Bye");
 		p.close();
 	}

@@ -533,7 +533,9 @@ public class MailQueue extends BaseObject {
 				if (e.nextAttempt() <= now && active.add(e.id)) {
 					try {
 						workers.submit(() -> {
-							try {
+							// Everything logged while this message is delivered starts with its queue ID,
+							// whichever object logs it (the session that took it in logged "Queued <id>")
+							try (us.bringardner.parley.core.LogContext.Scope scope = us.bringardner.parley.core.LogContext.enter(e.id)) {
 								process(e);
 							} catch (Throwable t) {
 								logError("Error delivering " + e.id, t);
