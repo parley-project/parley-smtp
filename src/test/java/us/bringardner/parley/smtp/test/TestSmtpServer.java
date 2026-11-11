@@ -1102,4 +1102,121 @@ public class TestSmtpServer {
 			log.causes.add(error);
 		}
 	}
+
+	/** To-Do 19.7: SMTP QUIT is the reason in the server's disconnect line. */
+	@Test
+	public void testQuitIsTheReasonInTheDisconnectLine() throws Exception {
+		LogLevel level = a.getLogLevel();
+		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+		java.util.logging.Handler handler = new java.util.logging.Handler() {
+			@Override
+			public void publish(java.util.logging.LogRecord record) {
+				if (record != null && record.getMessage() != null) {
+					lines.add(record.getMessage());
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
+		root.addHandler(handler);
+		a.setLogLevel(LogLevel.INFO);
+		try (java.net.Socket socket = new java.net.Socket("localhost", a.getLocalPort())) {
+			socket.setSoTimeout(10000);
+			java.io.BufferedReader in = new java.io.BufferedReader(
+					new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+			assertNotNull(in.readLine(), "the greeting");
+			socket.getOutputStream().write("QUIT\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			socket.getOutputStream().flush();
+			while (in.readLine() != null) {
+				// the goodbye, then the server closes the connection
+			}
+			String line = null;
+			long end = System.currentTimeMillis() + 10000;
+			while (line == null && System.currentTimeMillis() < end) {
+				for (String l : lines) {
+					if (l.contains("Disconnected (")) {
+						line = l;
+					}
+				}
+				if (line == null) {
+					Thread.sleep(20);
+				}
+			}
+			assertNotNull(line, "no disconnect line in " + lines);
+			assertTrue(line.startsWith("[" + a.getName() + "-") && line.contains("] Disconnected (client quit) after "), line);
+		} finally {
+			a.setLogLevel(level);
+			root.removeHandler(handler);
+		}
+	}
+
+	/**
+	 * To-Do 19.7: the session logs the queue ID of a message it takes in, and the queue delivers the
+	 * message with that ID as its log ID, so a message can be followed from its session to its delivery.
+	 */
+	@Test
+	public void testAMessageCanBeFollowedFromItsSessionToItsDelivery() throws Exception {
+		reset(rootA, "tony");
+		LogLevel level = a.getLogLevel();
+		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+		java.util.logging.Handler handler = new java.util.logging.Handler() {
+			@Override
+			public void publish(java.util.logging.LogRecord record) {
+				if (record != null && record.getMessage() != null) {
+					lines.add(record.getMessage());
+				}
+			}
+
+			@Override
+			public void flush() {
+			}
+
+			@Override
+			public void close() {
+			}
+		};
+		java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
+		root.addHandler(handler);
+		// what the delivering thread's log ID is when the queue reports the delivery
+		java.util.Map<String, String> deliveredWith = new java.util.concurrent.ConcurrentHashMap<>();
+		us.bringardner.parley.smtp.queue.QueueListener listener = event -> {
+			if (event.getType() == us.bringardner.parley.smtp.queue.QueueEvent.Type.DELIVERED) {
+				deliveredWith.put(event.getId(), String.valueOf(us.bringardner.parley.core.LogContext.get()));
+			}
+		};
+		a.getQueue().addQueueListener(listener);
+		a.setLogLevel(LogLevel.INFO);
+		try {
+			String id;
+			try (Client c = new Client(a.getLocalPort())) {
+				c.ok("EHLO client.example", "250");
+				String reply = c.sendMail("x@ext.test", "tony@a.test", MESSAGE);
+				assertTrue(reply.startsWith("250 2.0.0 Ok: queued as "), reply);
+				id = reply.substring("250 2.0.0 Ok: queued as ".length()).trim();
+			}
+			waitFor(() -> deliveredWith.containsKey(id), 30000, "delivery of " + id);
+			assertEquals(id, deliveredWith.get(id), "the queue delivers with the queue ID as its log ID");
+			String queued = null;
+			for (String l : lines) {
+				if (l.contains("] Queued " + id + " ")) {
+					queued = l;
+				}
+			}
+			assertNotNull(queued, "no Queued line in " + lines);
+			assertTrue(queued.startsWith("[" + a.getName() + "-"), queued);
+			assertTrue(queued.contains("] Queued " + id + " from <x@ext.test> to <tony@a.test> ("), queued);
+			assertTrue(queued.endsWith(" bytes)"), queued);
+		} finally {
+			a.setLogLevel(level);
+			a.getQueue().removeQueueListener(listener);
+			root.removeHandler(handler);
+		}
+	}
 }
