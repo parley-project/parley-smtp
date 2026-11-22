@@ -2,6 +2,17 @@
 
 ## parley-smtp 2.0.0 (unreleased)
 
+### Changed (2026-11-22: the files the settings name are read through FileSource)
+
+- **DKIM key files, the aliases file and the public suffix list** are read through FileSource, as a path on the
+  file system the server uses or as a `filesource:` URL (`FileSourceFactory.resolve`). The DKIM keys were read from
+  the local disk with `java.io.File` whatever file system the mail was on, and the aliases file took a path only,
+  so a mail store in a database could not name them. `Dkim.addSigners(list, headers, factory)`,
+  `Dkim.parseSigners(list, headers, factory)`, `DkimKeys.privateKey(FileSource)` and
+  `PublicSuffixList.load(FileSource)` are new; the earlier methods use the default file system, as before.
+  `DkimKeys` (the command that makes a key) takes a path or a `filesource:` URL. A URL is never written
+  to a log message (its query can hold secrets).
+
 ### Changed (2026-11-11: session IDs in the log, To-Do 19.7)
 
 - **A message can be followed through the log.** The session that takes a message in logs, at INFO,

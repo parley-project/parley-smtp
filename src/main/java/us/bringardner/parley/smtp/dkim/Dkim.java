@@ -1,6 +1,5 @@
 package us.bringardner.parley.smtp.dkim;
 
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.GeneralSecurityException;
@@ -11,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import us.bringardner.parley.files.FileSourceFactory;
 
 import us.bringardner.parley.dns.resolve.Lookup;
 import us.bringardner.parley.smtp.queue.ParleyDnsMxResolver;
@@ -184,12 +184,22 @@ public final class Dkim {
 	/**
 	 * Add signers from a list such as
 	 * {@code example.com:mail2026:/etc/dkim/example.com.pem,example.org:s1:/etc/dkim/org.pem}
-	 * (domain:selector:private key file).
+	 * (domain:selector:private key file, a path or a {@code filesource:} URL).
 	 *
 	 * @param headers fields to sign (comma or colon separated), or null for the defaults
 	 */
 	public void addSigners(String list, String headers) throws IOException, GeneralSecurityException {
-		for (DkimSigner s : parseSigners(list, headers)) {
+		addSigners(list, headers, FileSourceFactory.getDefaultFactory());
+	}
+
+	/**
+	 * As {@link #addSigners(String, String)}, with the key files read through FACTORY: each key file is a
+	 * path on its file system, or a {@code filesource:} URL that names a file system of its own.
+	 *
+	 * @since 2.0.0
+	 */
+	public void addSigners(String list, String headers, FileSourceFactory factory) throws IOException, GeneralSecurityException {
+		for (DkimSigner s : parseSigners(list, headers, factory)) {
 			addSigner(s);
 		}
 	}
@@ -201,6 +211,16 @@ public final class Dkim {
 	 * @since 2.0.0
 	 */
 	public static List<DkimSigner> parseSigners(String list, String headers) throws IOException, GeneralSecurityException {
+		return parseSigners(list, headers, FileSourceFactory.getDefaultFactory());
+	}
+
+	/**
+	 * As {@link #parseSigners(String, String)}, with the key files read through FACTORY: each is a path on its
+	 * file system or a {@code filesource:} URL ({@link FileSourceFactory#resolve(String)}).
+	 *
+	 * @since 2.0.0
+	 */
+	public static List<DkimSigner> parseSigners(String list, String headers, FileSourceFactory factory) throws IOException, GeneralSecurityException {
 		List<DkimSigner> ret = new ArrayList<>();
 		for (String entry : list.split(",")) {
 			String e = entry.trim();
@@ -211,7 +231,7 @@ public final class Dkim {
 			if (p.length != 3) {
 				throw new IllegalArgumentException("DKIM key '" + e + "' is not domain:selector:keyfile");
 			}
-			DkimSigner s = new DkimSigner(p[0].trim(), p[1].trim(), DkimKeys.privateKey(new File(p[2].trim())));
+			DkimSigner s = new DkimSigner(p[0].trim(), p[1].trim(), DkimKeys.privateKey(factory.resolve(p[2].trim())));
 			if (headers != null && !headers.trim().isEmpty()) {
 				s.setHeaders(Arrays.asList(headers.trim().split("\\s*[,:]\\s*")));
 			}

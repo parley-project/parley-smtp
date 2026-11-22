@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * The Public Suffix List (https://publicsuffix.org): which names are public
@@ -50,6 +51,17 @@ public final class PublicSuffixList {
 					rules.add(ascii(line));
 				}
 			}
+		}
+	}
+
+	/**
+	 * Load a list from a file on any file system.
+	 *
+	 * @since 2.0.0
+	 */
+	public static PublicSuffixList load(FileSource file) throws IOException {
+		try (InputStream in = file.getInputStream()) {
+			return new PublicSuffixList(in);
 		}
 	}
 

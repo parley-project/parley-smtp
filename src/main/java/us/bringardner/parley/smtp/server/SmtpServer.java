@@ -2,7 +2,6 @@ package us.bringardner.parley.smtp.server;
 
 import us.bringardner.parley.net.server.ServerMain;
 import us.bringardner.parley.mail.server.AbstractMailServer;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -15,6 +14,7 @@ import java.util.Locale;
 
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.mail.Message;
 import us.bringardner.parley.net.IProcessor;
 import us.bringardner.parley.net.IProcessorFactory;
@@ -282,9 +282,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		String psl = setting("dmarc.publicSuffixList");
 		if (psl != null) {
 			try {
-				dmarc.setPublicSuffixList(PublicSuffixList.load(new File(psl)));
+				dmarc.setPublicSuffixList(PublicSuffixList.load(getFileSourceFactory().resolve(psl)));
 			} catch (IOException e) {
-				logError("Can't read the public suffix list " + psl + "; using the included copy", e);
+				logError("Can't read the public suffix list " + FileSourceFactory.safe(psl) + "; using the included copy", e);
 			}
 		}
 		c.getArc().setVerify(setting("arc.verify", true));
@@ -407,10 +407,10 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		}
 		String aliases = queueSetting(q, "aliases");
 		if (aliases != null) {
-			try (InputStream in = getFileSourceFactory().createFileSource(aliases).getInputStream()) {
+			try (InputStream in = getFileSourceFactory().resolve(aliases).getInputStream()) {
 				c.loadAliases(new String(in.readAllBytes(), StandardCharsets.UTF_8));
 			} catch (IOException e) {
-				logError("Can't read the aliases file " + aliases, e);
+				logError("Can't read the aliases file " + FileSourceFactory.safe(aliases), e);
 			}
 		}
 		tmp = queueSetting(q, "smartHost");
@@ -483,7 +483,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		tmp = queueSetting(q, "dkim.keys");
 		if (tmp != null) {
 			try {
-				c.getDkim().addSigners(tmp, queueSetting(q, "dkim.headers"));
+				c.getDkim().addSigners(tmp, queueSetting(q, "dkim.headers"), getFileSourceFactory());
 			} catch (IOException | GeneralSecurityException | RuntimeException e) {
 				logError("Can't load the DKIM keys (dkim.keys" + where + "); mail is sent unsigned", e);
 			}
@@ -594,10 +594,10 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		java.util.Map<String, List<String>> aliasMap = java.util.Collections.emptyMap();
 		String aliases = queueSetting(q, "aliases");
 		if (aliases != null) {
-			try (InputStream in = getFileSourceFactory().createFileSource(aliases).getInputStream()) {
+			try (InputStream in = getFileSourceFactory().resolve(aliases).getInputStream()) {
 				aliasMap = DeliveryConfig.parseAliases(new String(in.readAllBytes(), StandardCharsets.UTF_8));
 			} catch (IOException e) {
-				throw new IOException("Can't read the aliases file " + aliases + ": " + e.getMessage(), e);
+				throw new IOException("Can't read the aliases file " + FileSourceFactory.safe(aliases) + ": " + e.getMessage(), e);
 			}
 		}
 		List<DkimSigner> signers = java.util.Collections.emptyList();
