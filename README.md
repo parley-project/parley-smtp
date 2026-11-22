@@ -322,7 +322,7 @@ There is no fallback from one prefix to another, and no setting is taken from an
 | `parley.mail.smtp.spf.rejectFail` | false | Refuse MAIL FROM when the SPF result is `fail` (550 5.7.23) |
 | `parley.mail.smtp.dmarc.check` | true | Check DMARC for incoming mail and add the result to Authentication-Results |
 | `parley.mail.smtp.dmarc.enforce` | false | Act on the policy: refuse `p=reject` mail (550 5.7.1), deliver `p=quarantine` mail to Junk |
-| `parley.mail.smtp.dmarc.publicSuffixList` | the included copy | A newer `public_suffix_list.dat` for organizational domains |
+| `parley.mail.smtp.dmarc.publicSuffixList` | the included copy | A newer `public_suffix_list.dat` for organizational domains: a path on the server's file system or a `filesource:` URL |
 | `parley.mail.smtp.arc.verify` | true | Validate the ARC chains of incoming mail |
 | `parley.mail.smtp.serverId` | host, name and port | This server's id among those sharing the store |
 | `parley.mail.smtp.keyStoreName`, `parley.mail.smtp.keyStorePassword`, `parley.mail.smtp.keyStoreType` | none | Key store for STARTTLS and port 465 |
@@ -339,7 +339,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 |---|---|---|
 | `hostname` | (required) | The name the queue gives other servers (EHLO) and uses in notifications |
 | `domains` | (required) | Local domains, comma-separated |
-| `aliases`, `postmaster` | none, `postmaster` | Aliases file; user who receives postmaster mail |
+| `aliases`, `postmaster` | none, `postmaster` | Aliases file (a path on the mail root's file system, or a `filesource:` URL for a file system of its own, such as the local disk when the mail is in a database); user who receives postmaster mail |
 | `smartHost`, `smartHost.port`, `smartHost.user`, `smartHost.password`, `smartHost.tls` | none, 587, none, none, `required` | Smart host (the host only: its port is `smartHost.port`); `smartHost.password` names where the password is kept (`@keychain:...`, `@file:...`, `@env:...`), never the password, and is resolved as SMTP's (`parley.credentials.smtp.*`) |
 | `smartHost.auth` | none (AUTH PLAIN) | Comma separated SASL mechanisms for the smart host, best first, e.g. `SCRAM-SHA-256,PLAIN`. With SCRAM the password is not sent, and the smart host must prove it knows it. |
 | `resolver`, `dnsServers` | `jdk`, from `/etc/resolv.conf` | MX resolver: `jdk`, `parley-dns` or `parley-dns-iterative` (the older `bjldns` names still work); DNS servers for `parley-dns`. The checks of incoming mail use the same DNS servers. |
@@ -349,7 +349,7 @@ In `queue.properties` in the queue's directory, without a prefix:
 | `workers`, `retry`, `delayWarning`, `maxAge` | 4, `1m,5m,15m,30m,1h,2h`, `4h`, `5d` | Delivery workers, the waits between tries, the delay notice and when a message is returned (durations: a number without a unit is ms) |
 | `history`, `historyDirectory`, `historyDays` | true, `<root>/.smtp-history`, 30 | The queue's history (JSON lines, one file per day) |
 | `historyFileSource` | the mail root's | The file system of the history's folder, a FileSource type id such as `FileProxy` (local disk). One other than the mail root's needs `historyDirectory`. Set it to `FileProxy` when the mail is in a database: each log line is a row and a commit there |
-| `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated |
+| `dkim.keys` | none | DKIM signing keys: `domain:selector:keyfile`, comma-separated. A key file is a path on the mail root's file system, or a `filesource:` URL for a file system of its own (`example.com:mail2026:filesource:/etc/dkim/example.com.pem`) |
 | `dkim.headers` | see above | Fields to sign, comma-separated (From is required) |
 | `dkim.shared` | none | The domain (in `dkim.keys`) whose key signs mail from every local domain without one of its own |
 | `arc.seal`, `arc.domain` | true, none | Seal received mail that is forwarded, as `arc.domain` (no domain: no seal) |

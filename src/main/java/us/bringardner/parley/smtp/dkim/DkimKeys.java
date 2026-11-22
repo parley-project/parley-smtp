@@ -4,6 +4,7 @@ import us.bringardner.parley.core.util.Hex;
 import us.bringardner.parley.core.util.Der;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.InputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +21,8 @@ import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import java.util.Base64;
+import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.FileSourceFactory;
 
 /**
  * Reading and writing DKIM keys: private keys from PEM files, public keys from
@@ -42,6 +45,17 @@ public final class DkimKeys {
 	private static final byte[] RSA_ALGORITHM_ID = Hex.decode("300d06092a864886f70d0101010500");
 
 	private DkimKeys() {
+	}
+
+	/**
+	 * Read a private key from a PEM file on any file system (see {@link #privateKey(String)}).
+	 *
+	 * @since 2.0.0
+	 */
+	public static PrivateKey privateKey(FileSource pemFile) throws IOException, GeneralSecurityException {
+		try (InputStream in = pemFile.getInputStream()) {
+			return privateKey(new String(in.readAllBytes(), StandardCharsets.US_ASCII));
+		}
 	}
 
 	/** Read a private key from a PEM file (see {@link #privateKey(String)}). */
@@ -151,21 +165,21 @@ public final class DkimKeys {
 	/** Usage: DkimKeys rsa|ed25519 private-key.pem */
 	public static void main(String[] args) throws Exception {
 		if (args.length != 2) {
-			System.err.println("Usage: java " + DkimKeys.class.getName() + " rsa|ed25519 private-key.pem");
+			System.err.println("Usage: java " + DkimKeys.class.getName() + " rsa|ed25519 private-key.pem (a path or a filesource: URL)");
 			System.exit(2);
 		}
-		File f = new File(args[1]);
+		FileSource f = FileSource.of(args[1]);
 		if (f.exists()) {
-			System.err.println(f + " already exists");
+			System.err.println(FileSourceFactory.safe(args[1]) + " already exists");
 			System.exit(1);
 		}
 		KeyPair kp = generate(args[0]);
-		try (OutputStream out = Files.newOutputStream(f.toPath())) {
+		try (OutputStream out = f.getOutputStream()) {
 			out.write(toPem(kp.getPrivate()).getBytes(StandardCharsets.US_ASCII));
 		}
 		f.setReadable(false, false);
 		f.setReadable(true, true);
-		System.out.println("Private key written to " + f);
+		System.out.println("Private key written to " + FileSourceFactory.safe(args[1]));
 		System.out.println("Publish this TXT record at <selector>._domainkey.<domain>:");
 		System.out.println(dnsRecord(kp.getPublic()));
 	}
