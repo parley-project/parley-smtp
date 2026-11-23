@@ -216,6 +216,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			}
 		});
 
+		shareSmtpSettings();
 		readServerSettings();
 
 		if (getUserRegistry() == null) {
@@ -229,6 +230,23 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private String setting(String name) {
 		String v = getProperty(propertyName(name));
 		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	/**
+	 * A setting the SMTP servers share (after this server's prefix, then {@value #SMTP_PREFIX}), or null. A
+	 * submission server's own value wins; without one it takes the relay's.
+	 */
+	private String inheritedSetting(String name) {
+		String v = getInheritedProperty(name);
+		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	/** The submission servers fall back to the relay's settings that are shared. */
+	private void shareSmtpSettings() {
+		String prefix = getPropertyPrefix();
+		if (!SMTP_PREFIX.equals(prefix)) {
+			setPropertyPrefixes(prefix, SMTP_PREFIX);
+		}
 	}
 
 	private boolean setting(String name, boolean defaultValue) {
@@ -258,7 +276,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private void readServerSettings() {
 		setRequireTls(setting("requireTls", false));
 		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, null, null);
-		hostname = setting("hostname"); // required: start() says so
+		hostname = inheritedSetting("hostname"); // required: start() says so
 		maxMessageSize = setting("maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 		maxRecipients = setting("maxRecipients", 100);
 		timeout = us.bringardner.parley.core.util.Durations.toIntMillis(durationSetting("timeout", 5 * 60 * 1000));
@@ -358,8 +376,10 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	/** The queue's settings that must be there, or be right, before any is used */
 	private void checkQueueSettings(java.util.Properties q, String where) throws IOException {
-		if (queueSetting(q, "hostname") == null) {
-			throw new IOException("The mail queue's hostname isn't set" + where);
+		if (queueSetting(q, "hostname") != null) {
+			// the queue is shared by every machine that uses the store, so one name there can't be each machine's own
+			logWarn("The mail queue's hostname" + where + " is no longer read: this server's own " + propertyName("hostname")
+					+ " is the name it gives in HELO, bounces and reports. Remove it.");
 		}
 		if (queueSetting(q, "domains") == null) {
 			throw new IOException("The mail queue's domains aren't set" + where);
@@ -394,8 +414,10 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	private void applyQueueSettings(java.util.Properties q, String where) throws IOException {
 		DeliveryConfig c = deliveryConfig;
-		String host = queueSetting(q, "hostname");
-		c.setHostname(host);
+		String host = hostname; // this server's own name (it is required to start); the queue's is not read
+		if (host != null) {
+			c.setHostname(host);
+		}
 		for (String d : queueSetting(q, "domains").split(",")) {
 			if (!d.trim().isEmpty()) {
 				c.addLocalDomain(d.trim());
@@ -516,7 +538,9 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		if (tmp != null) {
 			reporter.setFailure(Boolean.parseBoolean(tmp));
 		}
-		reporter.setHostname(host);
+		if (host != null) {
+			reporter.setHostname(host);
+		}
 		String org = queueSetting(q, "dmarc.reportOrgName");
 		String email = queueSetting(q, "dmarc.reportEmail");
 		if (org != null) {
@@ -816,9 +840,13 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		return hostname;
 	}
 
-	/** The name this server gives in its greeting and Received headers (the queue has its own) */
+	/** The name this server gives in its greeting, Received headers, HELO, bounces and reports */
 	public void setHostname(String hostname) {
 		this.hostname = hostname;
+		if (hostname != null) {
+			deliveryConfig.setHostname(hostname);
+			deliveryConfig.getDmarc().getReporter().setHostname(hostname);
+		}
 	}
 
 	/**
@@ -890,6 +918,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			setPropertyPrefix(SMTP_PREFIX);
 		}
 		if (!getPropertyPrefix().equals(before)) {
+			shareSmtpSettings();
 			readServerSettings(); // the new prefix's own settings
 		}
 	}
