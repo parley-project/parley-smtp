@@ -108,4 +108,31 @@ public class TestSharedHostname {
 		s.setSubmission(true);
 		assertEquals("sub.example.test", s.getHostname());
 	}
+
+	@Test
+	public void theQueuesHostnameIsNotRead() throws Exception {
+		// MailStoreSetup gave the queue "mx.localhost"
+		System.setProperty("parley.mail.smtp.hostname", "mx2.example.test");
+		SmtpServer s = new SmtpServer(0, "t", false, false);
+		assertEquals("mx2.example.test", s.getQueue().getConfig().getHostname());
+	}
+
+	@Test
+	public void aQueueWithoutAHostnameIsFine() throws Exception {
+		FileSource mail = FileSourceFactory.getDefaultFactory().createFileSource(new File(dir, "mail").getPath());
+		java.util.Properties q = new java.util.Properties();
+		q.setProperty("domains", "localhost");
+		us.bringardner.parley.smtp.queue.MailQueue.writeSettings(mail.getChild(SmtpServer.QUEUE_DIRECTORY), q);
+		System.setProperty("parley.mail.smtp.hostname", "mx2.example.test");
+		SmtpServer s = new SmtpServer(0, "t", false, false);
+		assertEquals("mx2.example.test", s.getQueue().getConfig().getHostname());
+	}
+
+	@Test
+	public void setHostnameChangesWhatTheQueueSays() {
+		System.setProperty("parley.mail.smtp.hostname", "mx2.example.test");
+		SmtpServer s = new SmtpServer(0, "t", false, false);
+		s.setHostname("other.example.test");
+		assertEquals("other.example.test", s.getQueue().getConfig().getHostname());
+	}
 }
