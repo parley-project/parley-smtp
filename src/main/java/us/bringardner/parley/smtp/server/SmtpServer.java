@@ -216,6 +216,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			}
 		});
 
+		shareSmtpSettings();
 		readServerSettings();
 
 		if (getUserRegistry() == null) {
@@ -229,6 +230,23 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private String setting(String name) {
 		String v = getProperty(propertyName(name));
 		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	/**
+	 * A setting the SMTP servers share (after this server's prefix, then {@value #SMTP_PREFIX}), or null. A
+	 * submission server's own value wins; without one it takes the relay's.
+	 */
+	private String inheritedSetting(String name) {
+		String v = getInheritedProperty(name);
+		return v == null || v.trim().isEmpty() ? null : v.trim();
+	}
+
+	/** The submission servers fall back to the relay's settings that are shared. */
+	private void shareSmtpSettings() {
+		String prefix = getPropertyPrefix();
+		if (!SMTP_PREFIX.equals(prefix)) {
+			setPropertyPrefixes(prefix, SMTP_PREFIX);
+		}
 	}
 
 	private boolean setting(String name, boolean defaultValue) {
@@ -258,7 +276,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	private void readServerSettings() {
 		setRequireTls(setting("requireTls", false));
 		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, null, null);
-		hostname = setting("hostname"); // required: start() says so
+		hostname = inheritedSetting("hostname"); // required: start() says so
 		maxMessageSize = setting("maxMessageSize", DEFAULT_MAX_MESSAGE_SIZE);
 		maxRecipients = setting("maxRecipients", 100);
 		timeout = us.bringardner.parley.core.util.Durations.toIntMillis(durationSetting("timeout", 5 * 60 * 1000));
@@ -890,6 +908,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			setPropertyPrefix(SMTP_PREFIX);
 		}
 		if (!getPropertyPrefix().equals(before)) {
+			shareSmtpSettings();
 			readServerSettings(); // the new prefix's own settings
 		}
 	}
