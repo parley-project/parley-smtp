@@ -174,7 +174,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	/**
 	 * Run the relay (parley.mail.smtp.port, default 25), submission (parley.mail.submission.port,
-	 * default 587) and, when there is a TLS key store, submission with implicit TLS
+	 * default 587) and submission with implicit TLS (which needs a TLS key store)
 	 * (parley.mail.submissions.port, default 465) in this process until it is stopped, with
 	 * parley-net's ServerMain.run: the settings are parley-smtp.properties in the settings folder (or
 	 * the file parley.mail.smtp.configFile names) and the command line, read as system properties,
@@ -193,7 +193,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, false, true), "Submission server", "submission"));
 			}
 			int p = SUBMISSIONS_PORT;
-			ret.add(ServerMain.optional(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)", "submissions")));
+			ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)", "submissions"));
 			return ret;
 		});
 	}
