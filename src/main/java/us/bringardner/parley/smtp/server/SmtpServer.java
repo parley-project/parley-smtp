@@ -211,7 +211,6 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 			@Override
 			public IProcessor getProcessor() {
 				SmtpRequestProcessor ret = new SmtpRequestProcessor();
-				ret.useConfigurationOf(SmtpServer.this);
 				return ret;
 			}
 		});

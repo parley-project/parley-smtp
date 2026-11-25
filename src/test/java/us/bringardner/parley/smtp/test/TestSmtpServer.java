@@ -126,7 +126,7 @@ public class TestSmtpServer {
 		submission.setHostname("mx.a.test");
 		submission.setLoginFailureDelay(0);
 		submission.setQueue(a.getQueue());
-		submission.setLogLevel(LogLevel.ERROR);
+		submission.getLogger().setLevel(LogLevel.ERROR);
 		submission.startAndWait(10000);
 	}
 
@@ -138,7 +138,7 @@ public class TestSmtpServer {
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
 		s.setLoginFailureDelay(0);
-		s.setLogLevel(LogLevel.ERROR);
+		s.getLogger().setLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new java.util.HashMap<>())); // SPF without real DNS: every domain has none
 		s.getDmarc().setDns(TestDkim.keys(new java.util.HashMap<>())::txt); // nor DMARC: no policy records
 		return s;
@@ -533,8 +533,8 @@ public class TestSmtpServer {
 	public void testSendPermissionUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(permissionsDown());
-		us.bringardner.parley.core.LogLevel level = submission.getLogLevel();
-		submission.setLogLevel(LogLevel.NONE);
+		us.bringardner.parley.core.LogLevel level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			// the login doesn't need the permission; MAIL FROM does, and can't check it now
@@ -556,7 +556,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.setLogLevel(level);
+			submission.getLogger().setLevel(level);
 		}
 	}
 
@@ -668,8 +668,8 @@ public class TestSmtpServer {
 	public void testSendAsUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(sendAsAcl(true));
-		LogLevel level = submission.getLogLevel();
-		submission.setLogLevel(LogLevel.NONE);
+		LogLevel level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.ok("EHLO client.example", "250");
 			c.ok("AUTH PLAIN " + plain("carol", "carolpw"), "235");
@@ -682,7 +682,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("451 4.7.0 The sendAs permission can't be checked now"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.setLogLevel(level);
+			submission.getLogger().setLevel(level);
 		}
 	}
 
@@ -690,8 +690,8 @@ public class TestSmtpServer {
 	public void testAccessControlUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(downAcl());
-		us.bringardner.parley.core.LogLevel level = submission.getLogLevel();
-		submission.setLogLevel(LogLevel.NONE);
+		us.bringardner.parley.core.LogLevel level = submission.getLogger().getLevel();
+		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			for (int i = 0; i < 6; i++) {
@@ -702,7 +702,7 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("454 4.7.0"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.setLogLevel(level);
+			submission.getLogger().setLevel(level);
 		}
 		// a local recipient that can't be looked up is tried again later, not refused as unknown,
 		// and the cause is logged, since the reply doesn't give it
@@ -1083,7 +1083,7 @@ public class TestSmtpServer {
 
 		RecordingProcessor(RecordingLogger log) {
 			this.log = log;
-			setLogLevel(LogLevel.NONE);
+			getLogger().setLevel(LogLevel.NONE);
 		}
 
 		@Override
@@ -1106,7 +1106,7 @@ public class TestSmtpServer {
 	/** To-Do 19.7: SMTP QUIT is the reason in the server's disconnect line. */
 	@Test
 	public void testQuitIsTheReasonInTheDisconnectLine() throws Exception {
-		LogLevel level = a.getLogLevel();
+		LogLevel level = a.getLogger().getLevel();
 		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
 		java.util.logging.Handler handler = new java.util.logging.Handler() {
 			@Override
@@ -1126,7 +1126,7 @@ public class TestSmtpServer {
 		};
 		java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
 		root.addHandler(handler);
-		a.setLogLevel(LogLevel.INFO);
+		a.getLogger().setLevel(LogLevel.INFO);
 		try (java.net.Socket socket = new java.net.Socket("localhost", a.getLocalPort())) {
 			socket.setSoTimeout(10000);
 			java.io.BufferedReader in = new java.io.BufferedReader(
@@ -1152,7 +1152,7 @@ public class TestSmtpServer {
 			assertNotNull(line, "no disconnect line in " + lines);
 			assertTrue(line.startsWith("[" + a.getName() + "-") && line.contains("] Disconnected (client quit) after "), line);
 		} finally {
-			a.setLogLevel(level);
+			a.getLogger().setLevel(level);
 			root.removeHandler(handler);
 		}
 	}
@@ -1164,7 +1164,7 @@ public class TestSmtpServer {
 	@Test
 	public void testAMessageCanBeFollowedFromItsSessionToItsDelivery() throws Exception {
 		reset(rootA, "tony");
-		LogLevel level = a.getLogLevel();
+		LogLevel level = a.getLogger().getLevel();
 		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
 		java.util.logging.Handler handler = new java.util.logging.Handler() {
 			@Override
@@ -1192,7 +1192,7 @@ public class TestSmtpServer {
 			}
 		};
 		a.getQueue().addQueueListener(listener);
-		a.setLogLevel(LogLevel.INFO);
+		a.getLogger().setLevel(LogLevel.INFO);
 		try {
 			String id;
 			try (Client c = new Client(a.getLocalPort())) {
@@ -1214,7 +1214,7 @@ public class TestSmtpServer {
 			assertTrue(queued.contains("] Queued " + id + " from <x@ext.test> to <tony@a.test> ("), queued);
 			assertTrue(queued.endsWith(" bytes)"), queued);
 		} finally {
-			a.setLogLevel(level);
+			a.getLogger().setLevel(level);
 			a.getQueue().removeQueueListener(listener);
 			root.removeHandler(handler);
 		}

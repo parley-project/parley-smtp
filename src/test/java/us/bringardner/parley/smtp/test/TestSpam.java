@@ -633,7 +633,7 @@ public class TestSpam {
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");
-		b.setLogLevel(LogLevel.ERROR);
+		b.getLogger().setLevel(LogLevel.ERROR);
 		b.startAndWait(10000);
 	}
 

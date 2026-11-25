@@ -91,7 +91,7 @@ public class TestDmarcSmtp {
 		s.setHostname(host);
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
-		s.setLogLevel(LogLevel.ERROR);
+		s.getLogger().setLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new HashMap<>()));
 		s.getDmarc().setDns(TestDkim.keys(new HashMap<>())::txt);
 		return s;

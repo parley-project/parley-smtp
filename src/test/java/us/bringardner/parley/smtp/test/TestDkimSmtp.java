@@ -83,7 +83,7 @@ public class TestDkimSmtp {
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
 		s.setLoginFailureDelay(0);
-		s.setLogLevel(LogLevel.ERROR);
+		s.getLogger().setLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new java.util.HashMap<>())); // SPF without real DNS: every domain has none
 		s.getDmarc().setDns(TestDkim.keys(new java.util.HashMap<>())::txt); // nor DMARC: no policy records
 		return s;

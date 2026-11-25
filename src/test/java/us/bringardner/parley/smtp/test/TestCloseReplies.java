@@ -27,7 +27,7 @@ public class TestCloseReplies {
 			s.setMaildropRoot(root);
 			MailStoreSetup.setUp(root, "mx.c.test", "c.test");
 			s.setHostname("mx.c.test");
-			s.setLogLevel(LogLevel.ERROR);
+			s.getLogger().setLevel(LogLevel.ERROR);
 			s.startAndWait(10000);
 			try (TestSmtpServer.Client c = new TestSmtpServer.Client(s.getLocalPort())) {
 				assertTrue(c.greeting.startsWith("220 "), c.greeting);

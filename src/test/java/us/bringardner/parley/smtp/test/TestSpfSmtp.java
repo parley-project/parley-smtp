@@ -39,7 +39,7 @@ public class TestSpfSmtp {
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");
-		b.setLogLevel(LogLevel.ERROR);
+		b.getLogger().setLevel(LogLevel.ERROR);
 
 		Map<String, Object> zone = new HashMap<>();
 		zone.put("pass.test", records("SPF", "v=spf1 ip4:127.0.0.0/8 ip6:::1 -all"));
