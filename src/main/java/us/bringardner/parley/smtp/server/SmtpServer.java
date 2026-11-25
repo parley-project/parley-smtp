@@ -149,6 +149,16 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	static final String NO_IMPLICIT_TLS_RELAY = "There is no SMTP relay with implicit TLS; implicit TLS is for a submission server (submissionServer(true))";
 
 	@Override
+	protected String getSettingsFileName() {
+		return "parley-smtp.properties";
+	}
+
+	@Override
+	protected String getSettingsFileProperty() {
+		return CONFIG_PROP;
+	}
+
+	@Override
 	protected String getRootProperty() {
 		return ROOT_PROP;
 	}
@@ -172,38 +182,23 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 * us.bringardner.parley:type=MailStore,name=<its id> while it runs (MailServerMain).
 	 */
 	public static void main(String[] args) throws Exception {
-		ServerMain.run("SmtpServer", args, CONFIG_PROP, "parley-smtp.properties", () -> {
+		ServerMain.run("SmtpServer", args, () -> {
 			java.util.List<ServerMain.Service> ret = new java.util.ArrayList<>();
 			{
-				int p = standalonePort(SMTP_PREFIX, SMTP_PORT);
+				int p = SMTP_PORT;
 				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, false, false), "SMTP server", "smtp"));
 			}
 			{
-				int p = standalonePort(SUBMISSION_PREFIX, SUBMISSION_PORT);
+				int p = SUBMISSION_PORT;
 				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, false, true), "Submission server", "submission"));
 			}
-			if (hasKeyStore(SUBMISSIONS_PREFIX)) {
-				int p = standalonePort(SUBMISSIONS_PREFIX, SUBMISSIONS_PORT);
-				ret.add(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)", "submissions"));
-			} else {
-				System.err.println("Warning: Submission server (implicit TLS) is skipped: no TLS key store (set " + MAIL_TLS_KEY_STORE_PROP + " or " + SUBMISSIONS_PREFIX + ".keyStoreName)");
-			}
+			int p = SUBMISSIONS_PORT;
+			ret.add(ServerMain.optional(us.bringardner.parley.mail.server.MailServerMain.service(new SmtpServer(p, SMTP_NAME, true, true), "Submission server (implicit TLS)", "submissions")));
 			return ret;
 		});
 	}
 
-	/** A server's port in a standalone process: {@code <prefix>.port}, else its standard port */
-	private static int standalonePort(String prefix, int standard) {
-		String v = System.getProperty(prefix + ".port");
-		return v == null || v.trim().isEmpty() ? standard : Integer.parseInt(v.trim());
-	}
 
-	/** A TLS key store for this server in a standalone process: the suite's, or its own */
-	private static boolean hasKeyStore(String prefix) {
-		String a = System.getProperty(MAIL_TLS_KEY_STORE_PROP);
-		String b = System.getProperty(prefix + ".keyStoreName");
-		return (a != null && !a.trim().isEmpty()) || (b != null && !b.trim().isEmpty());
-	}
 
 	private void initMe() {
 		setName("SmtpServer");
