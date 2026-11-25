@@ -3,6 +3,7 @@ package us.bringardner.parley.smtp.test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -143,6 +144,11 @@ public class TestFileSourceSettings {
 			assertEquals(List.of("tony", "team@b.test"), sales, "the aliases file on the store's file system");
 			DkimSigner signer = s.getDeliveryConfig().dkimSignerFor("a.test");
 			assertEquals("s1", signer.getSelector(), "the key file on the store's file system");
+
+			// reading the settings again (an admin saving a change) finds the key there too, not on the local disk
+			String used = s.getQueue().reload();
+			assertNotNull(used);
+			assertEquals("s1", s.getDeliveryConfig().dkimSignerFor("a.test").getSelector(), "after a reload");
 		} finally {
 			s.stop();
 		}
