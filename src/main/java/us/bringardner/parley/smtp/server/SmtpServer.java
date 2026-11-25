@@ -628,7 +628,7 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 		String keys = queueSetting(q, "dkim.keys");
 		if (keys != null) {
 			try {
-				signers = Dkim.parseSigners(keys, queueSetting(q, "dkim.headers"));
+				signers = Dkim.parseSigners(keys, queueSetting(q, "dkim.headers"), getFileSourceFactory());
 			} catch (IOException | GeneralSecurityException | RuntimeException e) {
 				throw new IOException("Can't load the DKIM keys (dkim.keys" + where + "): " + e.getMessage(), e);
 			}
