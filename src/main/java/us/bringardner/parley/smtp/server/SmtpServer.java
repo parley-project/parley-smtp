@@ -267,6 +267,14 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 	 * Read this server's own settings (about its port), under its prefix: again when the prefix
 	 * changes ({@link #setSubmission(boolean)}).
 	 */
+	@Override
+	protected void settingsRead(boolean fromFile) throws IOException {
+		super.settingsRead(fromFile);
+		if (fromFile) {
+			readServerSettings(); // the file the start has just read
+		}
+	}
+
 	private void readServerSettings() {
 		setRequireTls(setting("requireTls", false));
 		initMaildropRoot(FILE_SOURCE_PROP, null, ROOT_PROP, null, null, null);
@@ -675,13 +683,11 @@ public class SmtpServer extends AbstractMailServer implements SMTP {
 
 	/** Refuse to start without a hostname (it has no default) */
 	@Override
-	public synchronized void start() {
+	protected void checkSettings(java.util.List<String> problems) {
+		super.checkSettings(problems);
 		if (hostname == null) {
-			IOException err = new IOException("The hostname isn't set (" + propertyName("hostname") + ")");
-			logError("Can't start " + getName() + ": " + err.getMessage(), err);
-			throw new java.io.UncheckedIOException(err);
+			problems.add("The hostname isn't set (" + propertyName("hostname") + ")");
 		}
-		super.start();
 	}
 
 	// ------------------------------------------------------------------ life cycle
