@@ -35,7 +35,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.iam.AuthorizationResult;
@@ -60,12 +59,14 @@ import us.bringardner.parley.smtp.queue.MxResolver;
 import us.bringardner.parley.smtp.server.SmtpCommand;
 import us.bringardner.parley.smtp.server.SmtpRequestProcessor;
 import us.bringardner.parley.smtp.server.SmtpServer;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * End-to-end tests of SmtpServer over real sockets. Server A (domain a.test)
  * has a relay port and a submission port sharing one queue; server B (domain
  * b.test) is the "remote" MX that A relays to.
  */
+@ErrorsExpected
 public class TestSmtpServer {
 
 	private static final String KEYSTORE = scratchFile("pop3keystore.p12");
@@ -126,7 +127,6 @@ public class TestSmtpServer {
 		submission.setHostname("mx.a.test");
 		submission.setLoginFailureDelay(0);
 		submission.setQueue(a.getQueue());
-		submission.getLogger().setLevel(LogLevel.ERROR);
 		submission.startAndWait(10000);
 	}
 
@@ -138,7 +138,6 @@ public class TestSmtpServer {
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
 		s.setLoginFailureDelay(0);
-		s.getLogger().setLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new java.util.HashMap<>())); // SPF without real DNS: every domain has none
 		s.getDmarc().setDns(TestDkim.keys(new java.util.HashMap<>())::txt); // nor DMARC: no policy records
 		return s;
@@ -533,8 +532,6 @@ public class TestSmtpServer {
 	public void testSendPermissionUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(permissionsDown());
-		us.bringardner.parley.core.LogLevel level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			// the login doesn't need the permission; MAIL FROM does, and can't check it now
@@ -556,7 +553,6 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("535 5.7.8"), "a wrong password is still refused: " + reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
 		}
 	}
 
@@ -668,8 +664,6 @@ public class TestSmtpServer {
 	public void testSendAsUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(sendAsAcl(true));
-		LogLevel level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.ok("EHLO client.example", "250");
 			c.ok("AUTH PLAIN " + plain("carol", "carolpw"), "235");
@@ -682,7 +676,6 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("451 4.7.0 The sendAs permission can't be checked now"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
 		}
 	}
 
@@ -690,8 +683,6 @@ public class TestSmtpServer {
 	public void testAccessControlUnavailable() throws Exception {
 		UserRegistry old = submission.getUserRegistry();
 		submission.setUserRegistry(downAcl());
-		us.bringardner.parley.core.LogLevel level = submission.getLogger().getLevel();
-		submission.getLogger().setLevel(LogLevel.NONE);
 		try (Client c = new Client(submission.getLocalPort())) {
 			c.cmd("EHLO client.example");
 			for (int i = 0; i < 6; i++) {
@@ -702,7 +693,6 @@ public class TestSmtpServer {
 			assertTrue(reply.startsWith("454 4.7.0"), reply);
 		} finally {
 			submission.setUserRegistry(old);
-			submission.getLogger().setLevel(level);
 		}
 		// a local recipient that can't be looked up is tried again later, not refused as unknown,
 		// and the cause is logged, since the reply doesn't give it
@@ -1083,7 +1073,6 @@ public class TestSmtpServer {
 
 		RecordingProcessor(RecordingLogger log) {
 			this.log = log;
-			getLogger().setLevel(LogLevel.NONE);
 		}
 
 		@Override
@@ -1106,28 +1095,8 @@ public class TestSmtpServer {
 	/** To-Do 19.7: SMTP QUIT is the reason in the server's disconnect line. */
 	@Test
 	public void testQuitIsTheReasonInTheDisconnectLine() throws Exception {
-		LogLevel level = a.getLogger().getLevel();
-		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
-		java.util.logging.Handler handler = new java.util.logging.Handler() {
-			@Override
-			public void publish(java.util.logging.LogRecord record) {
-				if (record != null && record.getMessage() != null) {
-					lines.add(record.getMessage());
-				}
-			}
-
-			@Override
-			public void flush() {
-			}
-
-			@Override
-			public void close() {
-			}
-		};
-		java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
-		root.addHandler(handler);
-		a.getLogger().setLevel(LogLevel.INFO);
-		try (java.net.Socket socket = new java.net.Socket("localhost", a.getLocalPort())) {
+		try (us.bringardner.parley.logging.testing.LogCapture capture = new us.bringardner.parley.logging.testing.LogCapture();
+				java.net.Socket socket = new java.net.Socket("localhost", a.getLocalPort())) {
 			socket.setSoTimeout(10000);
 			java.io.BufferedReader in = new java.io.BufferedReader(
 					new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
@@ -1140,20 +1109,13 @@ public class TestSmtpServer {
 			String line = null;
 			long end = System.currentTimeMillis() + 10000;
 			while (line == null && System.currentTimeMillis() < end) {
-				for (String l : lines) {
-					if (l.contains("Disconnected (")) {
-						line = l;
-					}
-				}
+				line = capture.first("Disconnected (");
 				if (line == null) {
 					Thread.sleep(20);
 				}
 			}
-			assertNotNull(line, "no disconnect line in " + lines);
-			assertTrue(line.startsWith("[" + a.getName() + "-") && line.contains("] Disconnected (client quit) after "), line);
-		} finally {
-			a.getLogger().setLevel(level);
-			root.removeHandler(handler);
+			assertNotNull(line, "no disconnect line");
+			assertTrue(line.startsWith("INFO [" + a.getName() + "-") && line.contains("] Disconnected (client quit) after "), line);
 		}
 	}
 
@@ -1164,26 +1126,7 @@ public class TestSmtpServer {
 	@Test
 	public void testAMessageCanBeFollowedFromItsSessionToItsDelivery() throws Exception {
 		reset(rootA, "tony");
-		LogLevel level = a.getLogger().getLevel();
-		java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
-		java.util.logging.Handler handler = new java.util.logging.Handler() {
-			@Override
-			public void publish(java.util.logging.LogRecord record) {
-				if (record != null && record.getMessage() != null) {
-					lines.add(record.getMessage());
-				}
-			}
-
-			@Override
-			public void flush() {
-			}
-
-			@Override
-			public void close() {
-			}
-		};
-		java.util.logging.Logger root = java.util.logging.Logger.getLogger("");
-		root.addHandler(handler);
+		try (us.bringardner.parley.logging.testing.LogCapture capture = new us.bringardner.parley.logging.testing.LogCapture()) {
 		// what the delivering thread's log ID is when the queue reports the delivery
 		java.util.Map<String, String> deliveredWith = new java.util.concurrent.ConcurrentHashMap<>();
 		us.bringardner.parley.smtp.queue.QueueListener listener = event -> {
@@ -1192,7 +1135,6 @@ public class TestSmtpServer {
 			}
 		};
 		a.getQueue().addQueueListener(listener);
-		a.getLogger().setLevel(LogLevel.INFO);
 		try {
 			String id;
 			try (Client c = new Client(a.getLocalPort())) {
@@ -1203,20 +1145,14 @@ public class TestSmtpServer {
 			}
 			waitFor(() -> deliveredWith.containsKey(id), 30000, "delivery of " + id);
 			assertEquals(id, deliveredWith.get(id), "the queue delivers with the queue ID as its log ID");
-			String queued = null;
-			for (String l : lines) {
-				if (l.contains("] Queued " + id + " ")) {
-					queued = l;
-				}
-			}
-			assertNotNull(queued, "no Queued line in " + lines);
-			assertTrue(queued.startsWith("[" + a.getName() + "-"), queued);
+			String queued = capture.first("] Queued " + id + " ");
+			assertNotNull(queued, "no Queued line");
+			assertTrue(queued.startsWith("INFO [" + a.getName() + "-"), queued);
 			assertTrue(queued.contains("] Queued " + id + " from <x@ext.test> to <tony@a.test> ("), queued);
 			assertTrue(queued.endsWith(" bytes)"), queued);
 		} finally {
-			a.getLogger().setLevel(level);
 			a.getQueue().removeQueueListener(listener);
-			root.removeHandler(handler);
+		}
 		}
 	}
 }

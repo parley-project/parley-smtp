@@ -7,16 +7,17 @@ import static us.bringardner.parley.mail.test.MailTestSupport.deleteAll;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.net.server.FileUserRegistry;
 import us.bringardner.parley.net.server.IServer;
 import us.bringardner.parley.smtp.server.SmtpServer;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /** The 421 a session gets when the server closes it on its own (parley-net's replyClosing). */
 public class TestCloseReplies {
 
+	@ErrorsExpected
 	@Test
 	public void stoppingTheServerIs421ShuttingDown() throws Exception {
 		System.setProperty("parley.mail.smtp." + FileUserRegistry.PROP_FILE_NAME, ACL_FILE);
@@ -27,7 +28,6 @@ public class TestCloseReplies {
 			s.setMaildropRoot(root);
 			MailStoreSetup.setUp(root, "mx.c.test", "c.test");
 			s.setHostname("mx.c.test");
-			s.getLogger().setLevel(LogLevel.ERROR);
 			s.startAndWait(10000);
 			try (TestSmtpServer.Client c = new TestSmtpServer.Client(s.getLocalPort())) {
 				assertTrue(c.greeting.startsWith("220 "), c.greeting);

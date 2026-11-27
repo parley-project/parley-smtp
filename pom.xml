@@ -134,6 +134,21 @@
 			<version>2.3</version>
 			<scope>test</scope>
 		</dependency>
+		<!-- Tests log through parley-logging's ParleyLogger (an application's choice, so only for the tests) -->
+		<dependency>
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-logging</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<!-- The helpers that set a level, collect log lines and keep expected errors out of the output -->
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-logging</artifactId>
+			<version>${project.version}</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
 		<dependency>
 			<groupId>org.junit.jupiter</groupId>
 			<artifactId>junit-jupiter</artifactId>

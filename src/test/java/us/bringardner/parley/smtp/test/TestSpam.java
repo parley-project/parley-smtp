@@ -36,7 +36,6 @@ import org.junit.jupiter.api.Test;
 
 import com.sun.net.httpserver.HttpServer;
 
-import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.ConnectionSetting;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
@@ -55,8 +54,10 @@ import us.bringardner.parley.smtp.spam.SpamStatus;
 import us.bringardner.parley.smtp.spam.SpamRequest;
 import us.bringardner.parley.smtp.spam.SpamVerdict;
 import us.bringardner.parley.smtp.spam.SpamVerdict.Action;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /** The spam filter interface, its three filters, the per-domain choice of filter and the SMTP hook. */
+@ErrorsExpected
 public class TestSpam {
 
 	// ------------------------------------------------------------------ a filter to plug in
@@ -633,7 +634,6 @@ public class TestSpam {
 		b.setHostname("mx.b.test");
 		b.getDeliveryConfig().getLocalDomains().clear();
 		b.addLocalDomain("b.test");
-		b.getLogger().setLevel(LogLevel.ERROR);
 		b.startAndWait(10000);
 	}
 

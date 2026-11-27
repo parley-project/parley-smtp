@@ -21,12 +21,14 @@ import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.smtp.queue.DeliveryConfig;
 import us.bringardner.parley.smtp.test.MailStoreSetup;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * 2.0.0's settings with a unit in the value, not the name (To-Do 2.19): the queue's maxAge,
  * delayWarning, retry and dmarc.reportInterval, the server's timeout and pregreet.delay; and the
  * queue's smart host as smartHost.* (was relayHost...).
  */
+@ErrorsExpected
 public class TestDurationSettings {
 
 	private static final String[] CLEARED = { "parley.mail.root", "parley.mail.smtp.hostname", "parley.mail.smtp.timeout",

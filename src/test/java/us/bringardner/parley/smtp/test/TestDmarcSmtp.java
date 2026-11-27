@@ -15,7 +15,6 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.LogLevel;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.net.server.FileUserRegistry;
@@ -91,7 +90,6 @@ public class TestDmarcSmtp {
 		s.setHostname(host);
 		s.getDeliveryConfig().getLocalDomains().clear();
 		s.addLocalDomain(domain);
-		s.getLogger().setLevel(LogLevel.ERROR);
 		s.getSpf().setDns(new TestSpfSuite.Zone(new HashMap<>()));
 		s.getDmarc().setDns(TestDkim.keys(new HashMap<>())::txt);
 		return s;
